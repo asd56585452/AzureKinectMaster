@@ -5,10 +5,27 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <atomic>
+#include <k4a/k4a.h>
+#include <k4arecord/record.h>
+#include <k4arecord/playback.h>
 
 #pragma comment(lib, "Ws2_32.lib")
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
+
+//同步參數
+enum CameraType {
+    Master,
+    Sub,
+    Alone,
+};
+struct CameraReturnStruct
+{
+    bool start_up_success = false;
+    std::string serial_str;
+    k4a_calibration_t calibration;
+};
 
 void listenForServer(std::string& serverIP, int& serverPort);
 
@@ -73,6 +90,53 @@ void receiveMessage(SOCKET socket, int& msgType, std::vector<char>& data) {
     }
 }
 
+int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration, k4a_device_configuration_t config) {
+    uint32_t count = k4a_device_get_installed_count();
+    if (count == 0)
+    {
+        std::cerr << "No k4a devices attached!\n" << std::endl;
+        return -1;
+    }
+
+    // Open the first plugged in Kinect device
+    uint32_t camnum = K4A_DEVICE_DEFAULT;
+    while (K4A_FAILED(k4a_device_open(camnum, &device)))
+    {
+        camnum++;
+        if (camnum >= count)
+        {
+            std::cerr << "Failed to open k4a device!\n" << std::endl;
+            return -1;
+        } 
+    }
+
+    // Get the size of the serial number
+    size_t serial_size = 0;
+    k4a_device_get_serialnum(device, NULL, &serial_size);
+
+    // Allocate memory for the serial, then acquire it
+    char* serial = (char*)(malloc(serial_size));
+    k4a_device_get_serialnum(device, serial, &serial_size);
+    serial_str.assign(serial);
+    std::cout << "Opened device: " << serial_str << "\n";
+
+    // Start the camera with the given configuration
+    if (K4A_FAILED(k4a_device_start_cameras(device, &config)))
+    {
+        std::cerr << "Failed to start cameras!\n" << std::endl;
+        return -1;
+    }
+
+    // Get calibration data
+    if (K4A_FAILED(k4a_device_get_calibration(device, config.depth_mode, config.color_resolution, &calibration)))
+    {
+        std::cerr << "Failed to get calibration\n" << std::endl;
+        k4a_device_close(device);
+        return -1;
+    }
+    return 1;
+}
+
 int main() {
     WSADATA wsaData;
     int iResult;
@@ -124,6 +188,41 @@ int main() {
     std::cout << "Connected to server." << std::endl;
 
     try {
+        //傳送Client相機類別
+        int camtype = Alone;
+        std::vector<char> camtype_data(sizeof(camtype));
+        std::memcpy(camtype_data.data(), &camtype, sizeof(camtype));
+        sendMessage(ConnectSocket, -1, camtype_data);
+        //接收相機參數
+        k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
+        int msgType;
+        std::vector<char> config_data;
+        receiveMessage(ConnectSocket, msgType, config_data);
+        if (msgType == -2)
+        {
+            std::memcpy(&config, config_data.data(), sizeof(config));
+            std::cout << "Set device config: sync_mode " << config.wired_sync_mode << std::endl;
+        }
+        else
+        {
+            std::cerr << "Set device config fail: " << std::endl;
+        }
+        //設定相機參數
+        k4a_device_t device;
+        struct CameraReturnStruct CRS;
+        if (CameraStartup(device, CRS.serial_str, CRS.calibration, config) < 0)
+        {
+            std::cerr << "Failed to Startup camera" << std::endl;
+            CRS.start_up_success = false;
+        }
+        else
+        {
+            CRS.start_up_success = true;
+        }
+        // 回報設定成功
+        std::vector<char> CRS_data(sizeof(CRS));
+        std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
+        sendMessage(ConnectSocket, -3, CRS_data);
         // 创建接收和发送线程
         std::thread recvThread([ConnectSocket]() {
             while (true) {
@@ -154,6 +253,8 @@ int main() {
             });
 
         std::thread sendThread([ConnectSocket]() {
+
+
             while (true) {
                 // 从控制台读取要发送的消息
                 std::cout << "Enter message to send to server (type 'file:<filepath>' to send a file): ";
