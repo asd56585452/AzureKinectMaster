@@ -9,10 +9,48 @@
 #include <k4a/k4a.h>
 #include <k4arecord/record.h>
 #include <k4arecord/playback.h>
+#include <opencv2/opencv.hpp>
 
 #pragma comment(lib, "Ws2_32.lib")
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
+#define TIMEOUT_IN_MS 100
+
+//CV Mat 傳輸相關設定
+template <typename T>
+class ThreadSafeQueue {
+private:
+    std::queue<T> queue_;
+    std::mutex mutex_;
+    std::condition_variable cond_var_;
+
+public:
+    // Push an item into the queue
+    void push(const T& item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.push(item);
+        cond_var_.notify_one();
+    }
+
+    // Pop an item from the queue with blocking
+    T wait_and_pop() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cond_var_.wait(lock, [this] { return !queue_.empty(); });
+        T item = queue_.front();
+        queue_.pop();
+        return item;
+    }
+
+    // Check if the queue is empty
+    bool empty() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.empty();
+    }
+};
+struct FrameData {
+    cv::Mat image;
+    uint64_t timestamp;
+};
 
 //同步參數
 enum CameraType {
@@ -24,7 +62,6 @@ struct CameraReturnStruct
 {
     bool start_up_success = false;
     std::string serial_str;
-    k4a_calibration_t calibration;
 };
 
 void listenForServer(std::string& serverIP, int& serverPort);
@@ -138,6 +175,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 }
 
 int main() {
+    bool Stop = false;
     WSADATA wsaData;
     int iResult;
 
@@ -209,8 +247,9 @@ int main() {
         }
         //設定相機參數
         k4a_device_t device;
+        k4a_calibration_t calibration;
         struct CameraReturnStruct CRS;
-        if (CameraStartup(device, CRS.serial_str, CRS.calibration, config) < 0)
+        if (CameraStartup(device, CRS.serial_str, calibration, config) < 0)
         {
             std::cerr << "Failed to Startup camera" << std::endl;
             CRS.start_up_success = false;
@@ -218,14 +257,84 @@ int main() {
         else
         {
             CRS.start_up_success = true;
+            // 回報設定成功
+            std::vector<char> CRS_data(sizeof(CRS));
+            std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
+            sendMessage(ConnectSocket, -3, CRS_data);
         }
-        // 回報設定成功
-        std::vector<char> CRS_data(sizeof(CRS));
-        std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
-        sendMessage(ConnectSocket, -3, CRS_data);
+        /*k4a_device_stop_cameras(device);
+        k4a_device_close(device);*/
+        // 創建錄製線程
+        ThreadSafeQueue<FrameData> queue;
+        std::thread recordThread([&queue, device, &Stop]() {
+            while (!Stop) {
+                k4a_capture_t capture = NULL;
+                switch (k4a_device_get_capture(device, &capture, TIMEOUT_IN_MS))
+                {
+                case K4A_WAIT_RESULT_SUCCEEDED:
+                    break;
+                case K4A_WAIT_RESULT_TIMEOUT:
+                    printf("Timed out waiting for a capture\n");
+                    continue;
+                case K4A_WAIT_RESULT_FAILED:
+                    printf("Failed to read a capture\n");
+                    return 1;
+                }
+
+                // 处理彩色图像
+                k4a_image_t color_image = k4a_capture_get_color_image(capture);
+                if (color_image != NULL)
+                {
+                    int color_width = k4a_image_get_width_pixels(color_image);
+                    int color_height = k4a_image_get_height_pixels(color_image);
+                    uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
+                    // 将K4A图像转换为OpenCV Mat
+                    cv::Mat color_mat(color_height, color_width, CV_8UC4, (void*)k4a_image_get_buffer(color_image));
+
+                    queue.push({ color_mat.clone(), timestamp });
+                    // 释放彩色图像
+                    k4a_image_release(color_image);
+                }
+
+                // 释放捕获
+                k4a_capture_release(capture);
+            }
+            k4a_device_stop_cameras(device);
+            k4a_device_close(device);
+            });
+        // 創建圖像資料發送線程
+        std::thread recordSendThread([&queue, ConnectSocket, &Stop]() {
+            while (!Stop) {
+                // 從隊列中取出 FrameData
+                FrameData frameData = queue.wait_and_pop();
+
+                std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
+                std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
+                sendMessage(ConnectSocket, 3, frameData_timestamp_data);
+
+                std::vector<uchar> buffer;
+                cv::imencode(".png", frameData.image, buffer);
+                std::vector<char> char_vector(buffer.begin(), buffer.end());
+                sendMessage(ConnectSocket, 4, char_vector);
+
+                //std::vector<char> frameData_data(sizeof(frameData));
+                //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
+                //sendMessage(ConnectSocket, 3, frameData_data);
+                // 顯示圖片
+                //if (!frameData.image.empty()) {
+                //    cv::imshow("Frame", frameData.image);
+                //    std::cout << "Frame size: " << sizeof(frameData.image) << std::endl;
+
+                //    // 按下 ESC 鍵退出
+                //    if (cv::waitKey(1) == 27) {
+                //        break;
+                //    }
+                //}
+            }
+            });
         // 创建接收和发送线程
-        std::thread recvThread([ConnectSocket]() {
-            while (true) {
+        std::thread recvThread([ConnectSocket, &Stop]() {
+            while (!Stop) {
                 int msgType;
                 std::vector<char> data;
                 receiveMessage(ConnectSocket, msgType, data);
@@ -246,51 +355,61 @@ int main() {
                         std::cerr << "Failed to save file from server" << std::endl;
                     }
                 }
+                else if (msgType == 5) { // Camera cmd
+                    std::string cmd(data.begin(), data.end());
+                    if (cmd == "stop")
+                    {
+                        std::cout << "Stop Camera " << std::endl;
+                        Stop = true;
+                    }
+                }
                 else {
                     std::cerr << "Unknown message type from server: " << msgType << std::endl;
                 }
             }
             });
 
-        std::thread sendThread([ConnectSocket]() {
+        //std::thread sendThread([ConnectSocket, &Stop]() {
 
 
-            while (true) {
-                // 从控制台读取要发送的消息
-                std::cout << "Enter message to send to server (type 'file:<filepath>' to send a file): ";
-                std::string input;
-                std::getline(std::cin, input);
+        //    while (!Stop) {
+        //        // 从控制台读取要发送的消息
+        //        std::cout << "Enter message to send to server (type 'file:<filepath>' to send a file): ";
+        //        std::string input;
+        //        std::getline(std::cin, input);
 
-                if (input.substr(0, 5) == "file:") {
-                    std::string filePath = input.substr(5);
-                    std::ifstream inFile(filePath, std::ios::binary | std::ios::ate);
-                    if (!inFile) {
-                        std::cerr << "Failed to open file: " << filePath << std::endl;
-                        continue;
-                    }
-                    std::streamsize dataSize = inFile.tellg();
-                    inFile.seekg(0, std::ios::beg);
+        //        if (input.substr(0, 5) == "file:") {
+        //            std::string filePath = input.substr(5);
+        //            std::ifstream inFile(filePath, std::ios::binary | std::ios::ate);
+        //            if (!inFile) {
+        //                std::cerr << "Failed to open file: " << filePath << std::endl;
+        //                continue;
+        //            }
+        //            std::streamsize dataSize = inFile.tellg();
+        //            inFile.seekg(0, std::ios::beg);
 
-                    std::vector<char> data(dataSize);
-                    if (!inFile.read(data.data(), dataSize)) {
-                        std::cerr << "Failed to read file content." << std::endl;
-                        continue;
-                    }
-                    inFile.close();
+        //            std::vector<char> data(dataSize);
+        //            if (!inFile.read(data.data(), dataSize)) {
+        //                std::cerr << "Failed to read file content." << std::endl;
+        //                continue;
+        //            }
+        //            inFile.close();
 
-                    sendMessage(ConnectSocket, 2, data);
-                    std::cout << "File sent to server" << std::endl;
-                }
-                else {
-                    std::vector<char> data(input.begin(), input.end());
-                    sendMessage(ConnectSocket, 1, data);
-                    std::cout << "Text message sent to server" << std::endl;
-                }
-            }
-            });
+        //            sendMessage(ConnectSocket, 2, data);
+        //            std::cout << "File sent to server" << std::endl;
+        //        }
+        //        else {
+        //            std::vector<char> data(input.begin(), input.end());
+        //            sendMessage(ConnectSocket, 1, data);
+        //            std::cout << "Text message sent to server" << std::endl;
+        //        }
+        //    }
+        //    });
 
         recvThread.join();
-        sendThread.join();
+        //sendThread.join();
+        recordSendThread.join();
+        recordThread.join();
     }
     catch (const std::exception& e) {
         std::cerr << "Disconnected from server: " << e.what() << std::endl;
