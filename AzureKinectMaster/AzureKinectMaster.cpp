@@ -47,9 +47,90 @@ public:
         return queue_.empty();
     }
 };
-struct FrameData {
-    cv::Mat image;
-    uint64_t timestamp;
+struct ImagePacket {
+    k4a_image_format_t format;
+    int width;
+    int height;
+    int stride;
+    uint64_t timestamp;        // 時間戳（微秒）
+    std::vector<uint8_t> data; // 圖像數據
+
+    // 將 k4a_image_t 封裝到 ImagePacket
+    static ImagePacket from_k4a_image(k4a_image_t image) {
+        ImagePacket packet;
+        packet.format = k4a_image_get_format(image);
+        packet.width = k4a_image_get_width_pixels(image);
+        packet.height = k4a_image_get_height_pixels(image);
+        packet.stride = k4a_image_get_stride_bytes(image);
+        packet.timestamp = k4a_image_get_device_timestamp_usec(image); // 獲取時間戳
+
+        uint8_t* buffer = k4a_image_get_buffer(image);
+        size_t size = k4a_image_get_size(image);
+        packet.data.assign(buffer, buffer + size); // 將數據拷貝到 vector
+        return packet;
+    }
+
+    // 從 ImagePacket 解封裝回 k4a_image_t
+    k4a_image_t to_k4a_image() const {
+        k4a_image_t image;
+        if (k4a_image_create(format, width, height, stride, &image) != K4A_RESULT_SUCCEEDED) {
+            throw std::runtime_error("無法創建 k4a_image_t");
+        }
+
+        uint8_t* dest_buffer = k4a_image_get_buffer(image);
+        std::memcpy(dest_buffer, data.data(), data.size()); // 拷貝數據到目標圖像
+
+        // 如果需要，可以在這裡設定時間戳（Azure Kinect SDK 不支持直接設置時間戳）
+        return image;
+    }
+
+    // 序列化為 std::vector<char>
+    std::vector<char> serialize_to_char() const {
+        size_t header_size = sizeof(format) + sizeof(width) + sizeof(height) + sizeof(stride) + sizeof(timestamp);
+        std::vector<char> buffer(header_size + data.size());
+
+        // 拷貝頭部信息
+        size_t offset = 0;
+        std::memcpy(buffer.data() + offset, &format, sizeof(format));
+        offset += sizeof(format);
+        std::memcpy(buffer.data() + offset, &width, sizeof(width));
+        offset += sizeof(width);
+        std::memcpy(buffer.data() + offset, &height, sizeof(height));
+        offset += sizeof(height);
+        std::memcpy(buffer.data() + offset, &stride, sizeof(stride));
+        offset += sizeof(stride);
+        std::memcpy(buffer.data() + offset, &timestamp, sizeof(timestamp));
+        offset += sizeof(timestamp);
+
+        // 拷貝圖像數據
+        std::memcpy(buffer.data() + offset, data.data(), data.size());
+
+        return buffer;
+    }
+
+    // 從 std::vector<char> 反序列化
+    static ImagePacket deserialize_from_char(const std::vector<char>& buffer) {
+        ImagePacket packet;
+        size_t offset = 0;
+
+        // 提取頭部信息
+        std::memcpy(&packet.format, buffer.data() + offset, sizeof(packet.format));
+        offset += sizeof(packet.format);
+        std::memcpy(&packet.width, buffer.data() + offset, sizeof(packet.width));
+        offset += sizeof(packet.width);
+        std::memcpy(&packet.height, buffer.data() + offset, sizeof(packet.height));
+        offset += sizeof(packet.height);
+        std::memcpy(&packet.stride, buffer.data() + offset, sizeof(packet.stride));
+        offset += sizeof(packet.stride);
+        std::memcpy(&packet.timestamp, buffer.data() + offset, sizeof(packet.timestamp));
+        offset += sizeof(packet.timestamp);
+
+        // 提取圖像數據
+        packet.data.resize(buffer.size() - offset);
+        std::memcpy(packet.data.data(), buffer.data() + offset, packet.data.size());
+
+        return packet;
+    }
 };
 
 //同步參數
@@ -60,8 +141,9 @@ enum CameraType {
 };
 struct CameraReturnStruct
 {
-    bool start_up_success = false;
+    bool start_up_success;
     std::string serial_str;
+    k4a_calibration_t calibration;
 };
 
 void listenForServer(std::string& serverIP, int& serverPort);
@@ -247,9 +329,8 @@ int main() {
         }
         //設定相機參數
         k4a_device_t device;
-        k4a_calibration_t calibration;
-        struct CameraReturnStruct CRS;
-        if (CameraStartup(device, CRS.serial_str, calibration, config) < 0)
+        CameraReturnStruct CRS;
+        if (CameraStartup(device, CRS.serial_str, CRS.calibration, config) < 0)
         {
             std::cerr << "Failed to Startup camera" << std::endl;
             CRS.start_up_success = false;
@@ -265,7 +346,7 @@ int main() {
         /*k4a_device_stop_cameras(device);
         k4a_device_close(device);*/
         // 創建錄製線程
-        ThreadSafeQueue<FrameData> queue;
+        ThreadSafeQueue<ImagePacket> queue;
         std::thread recordThread([&queue, device, &Stop]() {
             while (!Stop) {
                 k4a_capture_t capture = NULL;
@@ -285,13 +366,14 @@ int main() {
                 k4a_image_t color_image = k4a_capture_get_color_image(capture);
                 if (color_image != NULL)
                 {
-                    int color_width = k4a_image_get_width_pixels(color_image);
-                    int color_height = k4a_image_get_height_pixels(color_image);
-                    uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
-                    // 将K4A图像转换为OpenCV Mat
-                    cv::Mat color_mat(color_height, color_width, CV_8UC4, (void*)k4a_image_get_buffer(color_image));
 
-                    queue.push({ color_mat.clone(), timestamp });
+                    //int color_width = k4a_image_get_width_pixels(color_image);
+                    //int color_height = k4a_image_get_height_pixels(color_image);
+                    //uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
+                    // 将K4A图像转换为OpenCV Mat
+                    //cv::Mat color_mat(color_height, color_width, CV_8UC4, (void*)k4a_image_get_buffer(color_image));
+
+                    queue.push(ImagePacket::from_k4a_image(color_image));
                     // 释放彩色图像
                     k4a_image_release(color_image);
                 }
@@ -306,16 +388,17 @@ int main() {
         std::thread recordSendThread([&queue, ConnectSocket, &Stop]() {
             while (!Stop) {
                 // 從隊列中取出 FrameData
-                FrameData frameData = queue.wait_and_pop();
+                ImagePacket frameData = queue.wait_and_pop();
+                sendMessage(ConnectSocket, 3, frameData.serialize_to_char());
 
-                std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
+                /*std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
                 std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
-                sendMessage(ConnectSocket, 3, frameData_timestamp_data);
+                sendMessage(ConnectSocket, 3, frameData_timestamp_data);*/
 
-                std::vector<uchar> buffer;
+                /*std::vector<uchar> buffer;
                 cv::imencode(".png", frameData.image, buffer);
                 std::vector<char> char_vector(buffer.begin(), buffer.end());
-                sendMessage(ConnectSocket, 4, char_vector);
+                sendMessage(ConnectSocket, 4, char_vector);*/
 
                 //std::vector<char> frameData_data(sizeof(frameData));
                 //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
