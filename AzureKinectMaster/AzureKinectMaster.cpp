@@ -15,6 +15,33 @@
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
 #define TIMEOUT_IN_MS 100
+//CV Mat轉換
+#include <stdexcept>
+
+cv::Mat k4a_to_cvmat(k4a_image_t k4a_image) {
+    if (k4a_image == nullptr) {
+        throw std::runtime_error("k4a_image_t is null");
+    }
+
+    // 獲取 k4a_image_t 的數據
+    int width = k4a_image_get_width_pixels(k4a_image);
+    int height = k4a_image_get_height_pixels(k4a_image);
+    int stride = k4a_image_get_stride_bytes(k4a_image);
+    uint8_t* buffer = k4a_image_get_buffer(k4a_image);
+    k4a_image_format_t format = k4a_image_get_format(k4a_image);
+
+    // 根據格式生成 cv::Mat
+    switch (format) {
+    case K4A_IMAGE_FORMAT_COLOR_BGRA32:
+        return cv::Mat(height, width, CV_8UC4, buffer, stride);
+    case K4A_IMAGE_FORMAT_DEPTH16:
+        return cv::Mat(height, width, CV_16U, buffer, stride);
+    case K4A_IMAGE_FORMAT_IR16:
+        return cv::Mat(height, width, CV_16U, buffer, stride);
+    default:
+        throw std::runtime_error("Unsupported k4a_image_format_t");
+    }
+}
 
 //CV Mat 傳輸相關設定
 template <typename T>
@@ -49,6 +76,7 @@ public:
 };
 struct FrameData {
     cv::Mat image;
+    cv::Mat depth_image;
     uint64_t timestamp;
 };
 
@@ -62,6 +90,7 @@ struct CameraReturnStruct
 {
     bool start_up_success = false;
     std::string serial_str;
+    k4a_calibration_t calibration;
 };
 
 void listenForServer(std::string& serverIP, int& serverPort);
@@ -247,9 +276,8 @@ int main() {
         }
         //設定相機參數
         k4a_device_t device;
-        k4a_calibration_t calibration;
         struct CameraReturnStruct CRS;
-        if (CameraStartup(device, CRS.serial_str, calibration, config) < 0)
+        if (CameraStartup(device, CRS.serial_str, CRS.calibration, config) < 0)
         {
             std::cerr << "Failed to Startup camera" << std::endl;
             CRS.start_up_success = false;
@@ -283,17 +311,18 @@ int main() {
 
                 // 处理彩色图像
                 k4a_image_t color_image = k4a_capture_get_color_image(capture);
-                if (color_image != NULL)
+                k4a_image_t depth_image = k4a_capture_get_depth_image(capture);
+                if (color_image != NULL && depth_image!=NULL)
                 {
-                    int color_width = k4a_image_get_width_pixels(color_image);
-                    int color_height = k4a_image_get_height_pixels(color_image);
                     uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
                     // 将K4A图像转换为OpenCV Mat
-                    cv::Mat color_mat(color_height, color_width, CV_8UC4, (void*)k4a_image_get_buffer(color_image));
+                    cv::Mat color_mat = k4a_to_cvmat(color_image);
+                    cv::Mat depth_mat = k4a_to_cvmat(depth_image);
 
-                    queue.push({ color_mat.clone(), timestamp });
+                    queue.push({ color_mat.clone(),depth_mat.clone(), timestamp });
                     // 释放彩色图像
                     k4a_image_release(color_image);
+                    k4a_image_release(depth_image);
                 }
 
                 // 释放捕获
@@ -312,10 +341,20 @@ int main() {
                 std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
                 sendMessage(ConnectSocket, 3, frameData_timestamp_data);
 
-                std::vector<uchar> buffer;
-                cv::imencode(".png", frameData.image, buffer);
-                std::vector<char> char_vector(buffer.begin(), buffer.end());
-                sendMessage(ConnectSocket, 4, char_vector);
+                {
+                    std::vector<uchar> buffer;
+                    cv::imencode(".png", frameData.image, buffer);
+                    std::vector<char> char_vector(buffer.begin(), buffer.end());
+                    sendMessage(ConnectSocket, 4, char_vector);
+                }
+                
+
+                {
+                    std::vector<uchar> buffer;
+                    cv::imencode(".png", frameData.depth_image, buffer);
+                    std::vector<char> char_vector(buffer.begin(), buffer.end());
+                    sendMessage(ConnectSocket, 6, char_vector);
+                }
 
                 //std::vector<char> frameData_data(sizeof(frameData));
                 //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
