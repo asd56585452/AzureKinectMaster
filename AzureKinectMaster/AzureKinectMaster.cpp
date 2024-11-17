@@ -15,6 +15,7 @@
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
 #define TIMEOUT_IN_MS 100
+#define K4A_DEVICE_DEFAULT_OFFSET 0;
 //CV Mat轉換
 #include <stdexcept>
 
@@ -165,7 +166,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
     }
 
     // Open the first plugged in Kinect device
-    uint32_t camnum = K4A_DEVICE_DEFAULT;
+    uint32_t camnum = K4A_DEVICE_DEFAULT + K4A_DEVICE_DEFAULT_OFFSET;
     while (K4A_FAILED(k4a_device_open(camnum, &device)))
     {
         camnum++;
@@ -256,7 +257,7 @@ int main() {
 
     try {
         //傳送Client相機類別
-        int camtype = Alone;
+        int camtype = Master;
         std::vector<char> camtype_data(sizeof(camtype));
         std::memcpy(camtype_data.data(), &camtype, sizeof(camtype));
         sendMessage(ConnectSocket, -1, camtype_data);
