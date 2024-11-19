@@ -14,8 +14,9 @@
 #pragma comment(lib, "Ws2_32.lib")
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
-#define TIMEOUT_IN_MS 100
+#define TIMEOUT_IN_MS 100000
 #define K4A_DEVICE_DEFAULT_OFFSET 0;
+#define MODE Master
 //CV Mat轉換
 #include <stdexcept>
 
@@ -206,6 +207,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 
 int main() {
     bool Stop = false;
+    bool Start = false;
     WSADATA wsaData;
     int iResult;
 
@@ -257,7 +259,7 @@ int main() {
 
     try {
         //傳送Client相機類別
-        int camtype = Master;
+        int camtype = MODE;
         std::vector<char> camtype_data(sizeof(camtype));
         std::memcpy(camtype_data.data(), &camtype, sizeof(camtype));
         sendMessage(ConnectSocket, -1, camtype_data);
@@ -295,7 +297,10 @@ int main() {
         k4a_device_close(device);*/
         // 創建錄製線程
         ThreadSafeQueue<FrameData> queue;
-        std::thread recordThread([&queue, device, &Stop]() {
+        std::thread recordThread([&queue, device, &Stop,&Start]() {
+            while (!Start) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             while (!Stop) {
                 k4a_capture_t capture = NULL;
                 switch (k4a_device_get_capture(device, &capture, TIMEOUT_IN_MS))
@@ -333,7 +338,10 @@ int main() {
             k4a_device_close(device);
             });
         // 創建圖像資料發送線程
-        std::thread recordSendThread([&queue, ConnectSocket, &Stop]() {
+        std::thread recordSendThread([&queue, ConnectSocket, &Stop, &Start]() {
+            while (!Start) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             while (!Stop) {
                 // 從隊列中取出 FrameData
                 FrameData frameData = queue.wait_and_pop();
@@ -373,7 +381,7 @@ int main() {
             }
             });
         // 创建接收和发送线程
-        std::thread recvThread([ConnectSocket, &Stop]() {
+        std::thread recvThread([ConnectSocket, &Stop, &Start]() {
             while (!Stop) {
                 int msgType;
                 std::vector<char> data;
@@ -401,6 +409,11 @@ int main() {
                     {
                         std::cout << "Stop Camera " << std::endl;
                         Stop = true;
+                    }
+                    else if (cmd == "start")
+                    {
+                        std::cout << "Start Camera " << std::endl;
+                        Start = true;
                     }
                 }
                 else {
