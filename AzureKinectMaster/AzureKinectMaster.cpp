@@ -222,7 +222,7 @@ int main() {
     int serverPort = 5555;
 
     // 监听服务器广播，获取服务器 IP 和端口
-    listenForServer(serverIP, serverPort);
+    //listenForServer(serverIP, serverPort);
 
     if (serverIP.empty() || serverPort == 0) {
         std::cerr << "Failed to receive server info." << std::endl;
