@@ -218,8 +218,8 @@ int main() {
         return 1;
     }
 
-    std::string serverIP;
-    int serverPort = 0;
+    std::string serverIP = "140.114.24.234";
+    int serverPort = 5555;
 
     // 监听服务器广播，获取服务器 IP 和端口
     listenForServer(serverIP, serverPort);
