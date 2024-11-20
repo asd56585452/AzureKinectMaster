@@ -16,7 +16,7 @@
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
 #define TIMEOUT_IN_MS 100000
 #define K4A_DEVICE_DEFAULT_OFFSET 0;
-#define MODE Master
+#define MODE Sub
 //CV Mat轉換
 #include <stdexcept>
 
@@ -92,7 +92,7 @@ struct CameraReturnStruct
 {
     bool start_up_success = false;
     std::string serial_str;
-    k4a_calibration_t calibration;
+    /*k4a_calibration_t calibration;*/
 };
 
 void listenForServer(std::string& serverIP, int& serverPort);
@@ -280,7 +280,8 @@ int main() {
         //設定相機參數
         k4a_device_t device;
         struct CameraReturnStruct CRS;
-        if (CameraStartup(device, CRS.serial_str, CRS.calibration, config) < 0)
+        k4a_calibration_t calibration;
+        if (CameraStartup(device, CRS.serial_str, calibration, config) < 0)
         {
             std::cerr << "Failed to Startup camera" << std::endl;
             CRS.start_up_success = false;
@@ -358,12 +359,12 @@ int main() {
                 }
                 
 
-                {
+                /*{
                     std::vector<uchar> buffer;
                     cv::imencode(".png", frameData.depth_image, buffer);
                     std::vector<char> char_vector(buffer.begin(), buffer.end());
                     sendMessage(ConnectSocket, 6, char_vector);
-                }
+                }*/
 
                 //std::vector<char> frameData_data(sizeof(frameData));
                 //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
