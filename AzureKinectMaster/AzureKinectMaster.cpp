@@ -298,7 +298,8 @@ int main() {
         k4a_device_close(device);*/
         // 創建錄製線程
         ThreadSafeQueue<FrameData> queue;
-        std::thread recordThread([&queue, device, &Stop,&Start]() {
+        std::thread recordThread([&queue, device, &Stop,&Start,&calibration]() {
+            k4a_transformation_t transformation = k4a_transformation_create(calibration);
             while (!Start) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
@@ -324,12 +325,36 @@ int main() {
                     uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
                     // 将K4A图像转换为OpenCV Mat
                     cv::Mat color_mat = k4a_to_cvmat(color_image);
-                    cv::Mat depth_mat = k4a_to_cvmat(depth_image);
+                    k4a_image_t transformed_depth_image = NULL;
+                    int color_width = calibration.color_camera_calibration.resolution_width;
+                    int color_height = calibration.color_camera_calibration.resolution_height;
+
+                    if (K4A_RESULT_SUCCEEDED != k4a_image_create(K4A_IMAGE_FORMAT_DEPTH16,
+                        color_width,
+                        color_height,
+                        color_width * (int)sizeof(uint16_t),
+                        &transformed_depth_image))
+                    {
+                        printf("Failed to create transformed depth image\n");
+                        k4a_image_release(depth_image);
+                        continue;
+                    }
+
+                    // Transform depth image to color camera geometry
+                    if (K4A_RESULT_SUCCEEDED != k4a_transformation_depth_image_to_color_camera(transformation, depth_image, transformed_depth_image))
+                    {
+                        printf("Failed to transform depth image to color camera\n");
+                        k4a_image_release(depth_image);
+                        k4a_image_release(transformed_depth_image);
+                        continue;
+                    }
+                    cv::Mat depth_mat = k4a_to_cvmat(transformed_depth_image);
 
                     queue.push({ color_mat.clone(),depth_mat.clone(), timestamp });
                     // 释放彩色图像
                     k4a_image_release(color_image);
                     k4a_image_release(depth_image);
+                    k4a_image_release(transformed_depth_image);
                 }
 
                 // 释放捕获
@@ -359,12 +384,12 @@ int main() {
                 }
                 
 
-                /*{
+                {
                     std::vector<uchar> buffer;
                     cv::imencode(".png", frameData.depth_image, buffer);
                     std::vector<char> char_vector(buffer.begin(), buffer.end());
                     sendMessage(ConnectSocket, 6, char_vector);
-                }*/
+                }
 
                 //std::vector<char> frameData_data(sizeof(frameData));
                 //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
