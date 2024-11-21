@@ -14,7 +14,7 @@
 #pragma comment(lib, "Ws2_32.lib")
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
-#define TIMEOUT_IN_MS 100000
+#define TIMEOUT_IN_MS 1000
 #define K4A_DEVICE_DEFAULT_OFFSET 0;
 #define MODE Sub
 //CV Mat轉換
