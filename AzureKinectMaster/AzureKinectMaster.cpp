@@ -263,6 +263,7 @@ int main() {
         std::vector<char> camtype_data(sizeof(camtype));
         std::memcpy(camtype_data.data(), &camtype, sizeof(camtype));
         sendMessage(ConnectSocket, -1, camtype_data);
+        std::cout << "傳送Client相機類別" << std::endl;
         //接收相機參數
         k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
         int msgType;
@@ -293,6 +294,7 @@ int main() {
             std::vector<char> CRS_data(sizeof(CRS));
             std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
             sendMessage(ConnectSocket, -3, CRS_data);
+            std::cout << "回報設定成功" << std::endl;
         }
         /*k4a_device_stop_cameras(device);
         k4a_device_close(device);*/
