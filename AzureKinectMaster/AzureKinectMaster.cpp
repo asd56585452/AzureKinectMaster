@@ -17,6 +17,7 @@
 #define TIMEOUT_IN_MS 1000
 #define K4A_DEVICE_DEFAULT_OFFSET 0;
 #define MODE Sub
+#define FRAME_DELAY_US 10000
 //CV Mat轉換
 #include <stdexcept>
 
@@ -70,6 +71,13 @@ public:
         return item;
     }
 
+    T wait_and_front() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cond_var_.wait(lock, [this] { return !queue_.empty(); });
+        T item = queue_.front();
+        return item;
+    }
+
     // Check if the queue is empty
     bool empty() const {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -81,6 +89,9 @@ struct FrameData {
     cv::Mat depth_image;
     uint64_t timestamp;
 };
+
+std::atomic<uint64_t> recording_stop_timestamp = 0;
+std::atomic<uint64_t> recording_start_timestamp = ULLONG_MAX - FRAME_DELAY_US;
 
 //同步參數
 enum CameraType {
@@ -205,6 +216,39 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
     return 1;
 }
 
+//創建工作目錄
+#include <filesystem> 
+namespace fs = std::filesystem;
+int switch_folder(std::string folderName ) {
+
+    // 創建資料夾
+    try {
+        if (fs::create_directory(folderName)) {
+            std::cout << "成功創建資料夾: " << folderName << std::endl;
+        }
+        else {
+            std::cerr << "資料夾已存在或創建失敗: " << folderName << std::endl;
+            //return 1;
+        }
+    }
+    catch (const fs::filesystem_error& e) {
+        std::cerr << "文件系統錯誤: " << e.what() << std::endl;
+        return 1;
+    }
+
+    // 切換工作目錄
+    try {
+        fs::current_path(folderName);
+        std::cout << "切換工作目錄至: " << fs::current_path() << std::endl;
+    }
+    catch (const fs::filesystem_error& e) {
+        std::cerr << "無法切換工作目錄: " << e.what() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+
 int main() {
     bool Stop = false;
     bool Start = false;
@@ -297,9 +341,10 @@ int main() {
         k4a_device_close(device);*/
         // 創建錄製線程
         ThreadSafeQueue<FrameData> queue;
+        ThreadSafeQueue<FrameData> queue2;
         std::thread recordThread([&queue, device, &Stop,&Start]() {
             while (!Start) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
             while (!Stop) {
                 k4a_capture_t capture = NULL;
@@ -338,9 +383,9 @@ int main() {
             k4a_device_close(device);
             });
         // 創建圖像資料發送線程
-        std::thread recordSendThread([&queue, ConnectSocket, &Stop, &Start]() {
+        std::thread recordSendThread([&queue,&queue2, ConnectSocket, &Stop, &Start]() {
             while (!Start) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
             while (!Stop) {
                 // 從隊列中取出 FrameData
@@ -350,7 +395,9 @@ int main() {
                 std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
                 sendMessage(ConnectSocket, 3, frameData_timestamp_data);
 
-                {
+                queue2.push(frameData);
+
+                /* {
                     std::vector<uchar> buffer;
                     cv::imencode(".png", frameData.image, buffer);
                     std::vector<char> char_vector(buffer.begin(), buffer.end());
@@ -363,7 +410,7 @@ int main() {
                     cv::imencode(".png", frameData.depth_image, buffer);
                     std::vector<char> char_vector(buffer.begin(), buffer.end());
                     sendMessage(ConnectSocket, 6, char_vector);
-                }
+                }*/
 
                 //std::vector<char> frameData_data(sizeof(frameData));
                 //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
@@ -381,7 +428,7 @@ int main() {
             }
             });
         // 创建接收和发送线程
-        std::thread recvThread([ConnectSocket, &Stop, &Start]() {
+        std::thread recvThread([ConnectSocket, &Stop, &Start, &queue2,&CRS]() {
             while (!Stop) {
                 int msgType;
                 std::vector<char> data;
@@ -415,6 +462,29 @@ int main() {
                         std::cout << "Start Camera " << std::endl;
                         Start = true;
                     }
+                }
+                else if (msgType == 7) { // Update delete time stamp
+                    FrameData frameDatat;
+                    std::memcpy(&frameDatat.timestamp, data.data(), sizeof(frameDatat.timestamp));
+                    while (queue2.wait_and_front().timestamp <= frameDatat.timestamp)
+                    {
+                        FrameData frameData = queue2.wait_and_pop();
+                        if (frameData.timestamp < recording_stop_timestamp + FRAME_DELAY_US && frameData.timestamp > recording_start_timestamp + FRAME_DELAY_US)
+                        {
+                            cv::imwrite(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", frameData.image);
+                            cv::imwrite(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", frameData.depth_image);
+                        }
+                    }
+                }
+                else if (msgType == 8) { // Update start time stamp
+                    std::memcpy(&recording_start_timestamp, data.data(), sizeof(recording_start_timestamp));
+                }
+                else if (msgType == 9) { // Update stop time stamp
+                    std::memcpy(&recording_stop_timestamp, data.data(), sizeof(recording_stop_timestamp));
+                }
+                else if (msgType == 10) { // Switch Floder
+                    std::string floderName(data.begin(), data.end());
+                    switch_folder(floderName);
                 }
                 else {
                     std::cerr << "Unknown message type from server: " << msgType << std::endl;
