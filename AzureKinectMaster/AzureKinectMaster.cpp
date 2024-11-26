@@ -219,7 +219,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 //創建工作目錄
 #include <filesystem> 
 namespace fs = std::filesystem;
-int switch_folder(std::string folderName ) {
+int switch_folder(std::string folderName , CameraReturnStruct CRS) {
 
     // 創建資料夾
     try {
@@ -244,6 +244,22 @@ int switch_folder(std::string folderName ) {
     catch (const fs::filesystem_error& e) {
         std::cerr << "無法切換工作目錄: " << e.what() << std::endl;
         return 1;
+    }
+
+    if (fs::create_directory(CRS.serial_str)) {
+    }
+    else {
+        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
+    }
+    if (fs::create_directory(CRS.serial_str + "/color")) {
+    }
+    else {
+        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
+    }
+    if (fs::create_directory(CRS.serial_str + "/depth")) {
+    }
+    else {
+        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
     }
 
     return 0;
@@ -468,7 +484,6 @@ int main() {
                     std::memcpy(&frameDatat.timestamp, data.data(), sizeof(frameDatat.timestamp));
                     while (queue2.wait_and_front().timestamp <= frameDatat.timestamp)
                     {
-                        std::cout << "Delete time stamp : " + frameDatat.timestamp;
                         FrameData frameData = queue2.wait_and_pop();
                         if (frameData.timestamp < recording_stop_timestamp + FRAME_DELAY_US && frameData.timestamp > recording_start_timestamp + FRAME_DELAY_US)
                         {
@@ -479,15 +494,15 @@ int main() {
                 }
                 else if (msgType == 8) { // Update start time stamp
                     std::memcpy(&recording_start_timestamp, data.data(), sizeof(recording_start_timestamp));
-                    std::cout << "Update start time stamp";
+                    std::cout << "Update start time stamp" << std::endl;
                 }
                 else if (msgType == 9) { // Update stop time stamp
                     std::memcpy(&recording_stop_timestamp, data.data(), sizeof(recording_stop_timestamp));
-                    std::cout << "Update stop time stamp";
+                    std::cout << "Update stop time stamp" << std::endl;
                 }
                 else if (msgType == 10) { // Switch Floder
                     std::string floderName(data.begin(), data.end());
-                    switch_folder(floderName);
+                    switch_folder(floderName, CRS);
                 }
                 else {
                     std::cerr << "Unknown message type from server: " << msgType << std::endl;
