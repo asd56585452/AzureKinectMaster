@@ -468,6 +468,7 @@ int main() {
                     std::memcpy(&frameDatat.timestamp, data.data(), sizeof(frameDatat.timestamp));
                     while (queue2.wait_and_front().timestamp <= frameDatat.timestamp)
                     {
+                        std::cout << "Delete time stamp : " + frameDatat.timestamp;
                         FrameData frameData = queue2.wait_and_pop();
                         if (frameData.timestamp < recording_stop_timestamp + FRAME_DELAY_US && frameData.timestamp > recording_start_timestamp + FRAME_DELAY_US)
                         {
@@ -478,9 +479,11 @@ int main() {
                 }
                 else if (msgType == 8) { // Update start time stamp
                     std::memcpy(&recording_start_timestamp, data.data(), sizeof(recording_start_timestamp));
+                    std::cout << "Update start time stamp";
                 }
                 else if (msgType == 9) { // Update stop time stamp
                     std::memcpy(&recording_stop_timestamp, data.data(), sizeof(recording_stop_timestamp));
+                    std::cout << "Update stop time stamp";
                 }
                 else if (msgType == 10) { // Switch Floder
                     std::string floderName(data.begin(), data.end());
