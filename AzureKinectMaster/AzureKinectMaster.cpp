@@ -552,8 +552,8 @@ int main() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100*camera_num));
                 FrameData frameData;
                 frameData.timestamp = queuePath.wait_and_pop();
-                cv::imread(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", frameData.image);
-                cv::imread(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", frameData.depth_image);
+                frameData.image = cv::imread(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
+                frameData.depth_image = cv::imread(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
                 std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
                 std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
                 sendMessage(FileSocket, 1, frameData_timestamp_data);
