@@ -92,6 +92,7 @@ struct FrameData {
 
 std::atomic<uint64_t> recording_stop_timestamp = 0;
 std::atomic<uint64_t> recording_start_timestamp = ULLONG_MAX - FRAME_DELAY_US;
+int camera_num = 16;
 
 //同步參數
 enum CameraType {
@@ -280,17 +281,18 @@ int main() {
 
     std::string serverIP = "140.114.24.234";
     int serverPort = 5555;
+    int serverFilePort = 8888;
 
     // 监听服务器广播，获取服务器 IP 和端口
     //listenForServer(serverIP, serverPort);
 
-    if (serverIP.empty() || serverPort == 0) {
+    if (serverIP.empty() || serverPort == 0 || serverFilePort == 0) {
         std::cerr << "Failed to receive server info." << std::endl;
         WSACleanup();
         return 1;
     }
 
-    std::cout << "Received server info: IP=" << serverIP << ", Port=" << serverPort << std::endl;
+    std::cout << "Received server info: IP=" << serverIP << ", Port=" << serverPort << ", FilePort=" << serverFilePort << std::endl;
 
     // 创建套接字
     SOCKET ConnectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -315,7 +317,34 @@ int main() {
         return 1;
     }
 
-    std::cout << "Connected to server." << std::endl;
+    std::cout << "Connected to server communication port." << std::endl;
+
+    // 创建第二个套接字用于文件传输
+    SOCKET FileSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (FileSocket == INVALID_SOCKET) {
+        std::cerr << "File socket failed: " << WSAGetLastError() << std::endl;
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    // 设置服务器地址和文件传输端口
+    sockaddr_in fileServerAddr;
+    fileServerAddr.sin_family = AF_INET;
+    inet_pton(AF_INET, serverIP.c_str(), &fileServerAddr.sin_addr.s_addr);
+    fileServerAddr.sin_port = htons(serverFilePort);
+
+    // 连接到服务器文件传输端口
+    iResult = connect(FileSocket, (SOCKADDR*)&fileServerAddr, sizeof(fileServerAddr));
+    if (iResult == SOCKET_ERROR) {
+        std::cerr << "connect failed (serverFilePort): " << WSAGetLastError() << std::endl;
+        closesocket(FileSocket);
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    std::cout << "Connected to server file transfer port." << std::endl;
 
     try {
         //傳送Client相機類別
@@ -504,6 +533,10 @@ int main() {
                     std::string floderName(data.begin(), data.end());
                     switch_folder(floderName, CRS);
                 }
+                else if (msgType == 11) { // Switch Floder
+                    std::memcpy(&camera_num, data.data(), sizeof(camera_num));
+                    std::cout << "Update camera_num" << std::endl;
+                }
                 else {
                     std::cerr << "Unknown message type from server: " << msgType << std::endl;
                 }
@@ -558,6 +591,7 @@ int main() {
 
     // 关闭套接字
     closesocket(ConnectSocket);
+    closesocket(FileSocket);
     WSACleanup();
     return 0;
 }
