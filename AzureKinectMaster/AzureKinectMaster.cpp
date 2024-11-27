@@ -387,6 +387,7 @@ int main() {
         // 創建錄製線程
         ThreadSafeQueue<FrameData> queue;
         ThreadSafeQueue<FrameData> queue2;
+        ThreadSafeQueue<uint64_t> queuePath;
         std::thread recordThread([&queue, device, &Stop,&Start]() {
             while (!Start) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -473,7 +474,7 @@ int main() {
             }
             });
         // 创建接收和发送线程
-        std::thread recvThread([ConnectSocket, &Stop, &Start, &queue2,&CRS]() {
+        std::thread recvThread([ConnectSocket, &Stop, &Start, &queue2,&CRS,&queuePath]() {
             while (!Stop) {
                 int msgType;
                 std::vector<char> data;
@@ -518,6 +519,7 @@ int main() {
                         {
                             cv::imwrite(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", frameData.image);
                             cv::imwrite(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", frameData.depth_image);
+                            queuePath.push(frameData.timestamp);
                         }
                     }
                 }
@@ -543,45 +545,36 @@ int main() {
             }
             });
 
-        //std::thread sendThread([ConnectSocket, &Stop]() {
+        std::thread sendFileThread([FileSocket, &Stop, &CRS,&queuePath]() {
 
 
-        //    while (!Stop) {
-        //        // 从控制台读取要发送的消息
-        //        std::cout << "Enter message to send to server (type 'file:<filepath>' to send a file): ";
-        //        std::string input;
-        //        std::getline(std::cin, input);
+            while (!Stop) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100*camera_num));
+                FrameData frameData;
+                frameData.timestamp = queuePath.wait_and_pop();
+                cv::imread(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", frameData.image);
+                cv::imread(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", frameData.depth_image);
+                std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
+                std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
+                sendMessage(FileSocket, 1, frameData_timestamp_data);
+                {
+                    std::vector<uchar> buffer;
+                    cv::imencode(".png", frameData.image, buffer);
+                    std::vector<char> char_vector(buffer.begin(), buffer.end());
+                    sendMessage(FileSocket, 2, char_vector);
+                }
 
-        //        if (input.substr(0, 5) == "file:") {
-        //            std::string filePath = input.substr(5);
-        //            std::ifstream inFile(filePath, std::ios::binary | std::ios::ate);
-        //            if (!inFile) {
-        //                std::cerr << "Failed to open file: " << filePath << std::endl;
-        //                continue;
-        //            }
-        //            std::streamsize dataSize = inFile.tellg();
-        //            inFile.seekg(0, std::ios::beg);
-
-        //            std::vector<char> data(dataSize);
-        //            if (!inFile.read(data.data(), dataSize)) {
-        //                std::cerr << "Failed to read file content." << std::endl;
-        //                continue;
-        //            }
-        //            inFile.close();
-
-        //            sendMessage(ConnectSocket, 2, data);
-        //            std::cout << "File sent to server" << std::endl;
-        //        }
-        //        else {
-        //            std::vector<char> data(input.begin(), input.end());
-        //            sendMessage(ConnectSocket, 1, data);
-        //            std::cout << "Text message sent to server" << std::endl;
-        //        }
-        //    }
-        //    });
+                {
+                    std::vector<uchar> buffer;
+                    cv::imencode(".png", frameData.depth_image, buffer);
+                    std::vector<char> char_vector(buffer.begin(), buffer.end());
+                    sendMessage(FileSocket, 3, char_vector);
+                }
+            }
+            });
 
         recvThread.join();
-        //sendThread.join();
+        sendFileThread.join();
         recordSendThread.join();
         recordThread.join();
     }
