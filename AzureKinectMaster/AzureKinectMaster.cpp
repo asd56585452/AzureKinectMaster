@@ -17,6 +17,7 @@
 #define TIMEOUT_IN_MS 1000
 #define K4A_DEVICE_DEFAULT_OFFSET 0;
 #define MODE Sub
+#define MODE2 Sub
 #define FRAME_DELAY_US 10000
 //CV Mat轉換
 #include <stdexcept>
@@ -170,7 +171,7 @@ void receiveMessage(SOCKET socket, int& msgType, std::vector<char>& data) {
     }
 }
 
-int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration, k4a_device_configuration_t config) {
+int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration,std::vector<char> &raw_calibration, k4a_device_configuration_t config, int white_balance, int exposure_time) {
     uint32_t count = k4a_device_get_installed_count();
     if (count == 0)
     {
@@ -188,6 +189,23 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
             std::cerr << "Failed to open k4a device!\n" << std::endl;
             return -1;
         } 
+    }
+
+    if (K4A_FAILED(k4a_device_set_color_control(
+        device,
+        K4A_COLOR_CONTROL_WHITEBALANCE,
+        K4A_COLOR_CONTROL_MODE_MANUAL,
+        white_balance))) {
+        std::cerr << "Failed to set white balance.\n";
+    }
+
+    // 设置曝光时间为 20000us
+    if (K4A_FAILED(k4a_device_set_color_control(
+        device,
+        K4A_COLOR_CONTROL_EXPOSURE_TIME_ABSOLUTE,
+        K4A_COLOR_CONTROL_MODE_MANUAL,
+        exposure_time))) {
+        std::cerr << "Failed to set exposure time.\n";
     }
 
     // Get the size of the serial number
@@ -214,6 +232,30 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
         k4a_device_close(device);
         return -1;
     }
+
+    // 获取校准数据大小
+    size_t calibration_data_size = 0;
+    if (k4a_device_get_raw_calibration(device, nullptr, &calibration_data_size) != K4A_RESULT_SUCCEEDED) {
+        std::cerr << "Failed to get calibration data size." << std::endl;
+        k4a_device_close(device);
+        return -1;
+    }
+
+    // 创建缓冲区以存储校准数据
+    std::vector<uint8_t> calibration_data(calibration_data_size);
+
+    // 获取校准数据
+    if (k4a_device_get_raw_calibration(device, calibration_data.data(), &calibration_data_size) != K4A_RESULT_SUCCEEDED) {
+        std::cerr << "Failed to get calibration data." << std::endl;
+        k4a_device_close(device);
+        return -1;
+    }
+
+    raw_calibration.resize(calibration_data.size());
+
+    // 使用 std::copy 复制数据
+    std::copy(calibration_data.begin(), calibration_data.end(), raw_calibration.begin());
+
     return 1;
 }
 
@@ -264,6 +306,33 @@ int switch_folder(std::string folderName , CameraReturnStruct CRS) {
     }
 
     return 0;
+}
+
+template <typename T>
+T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaultConfig) {
+    T config = defaultConfig; // 使用默认值初始化配置对象
+    std::vector<char> config_data;
+
+    // 接收消息
+    int msgType;
+    receiveMessage(connectSocket, msgType, config_data);
+
+    // 检查消息类型是否成功
+    if (msgType == msgTypeE) {
+        // 检查数据大小是否正确
+        if (config_data.size() >= sizeof(T)) {
+            std::memcpy(&config, config_data.data(), sizeof(T));
+            std::cout << "Set device config successfully: sync_mode " << config.wired_sync_mode << std::endl;
+        }
+        else {
+            std::cerr << "Configuration data size mismatch, using default config.\n";
+        }
+    }
+    else {
+        std::cerr << "Receive message failed (msgType: " << msgType << "), using default config.\n";
+    }
+
+    return config;
 }
 
 int main() {
@@ -353,7 +422,10 @@ int main() {
         std::memcpy(camtype_data.data(), &camtype, sizeof(camtype));
         sendMessage(ConnectSocket, -1, camtype_data);
         //接收相機參數
-        k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
+        k4a_device_configuration_t config = receiveAndSetConfiguration(ConnectSocket, -2, K4A_DEVICE_CONFIG_INIT_DISABLE_ALL);
+        int white_balance = receiveAndSetConfiguration(ConnectSocket, -5, 3500);
+        int exposure_time = receiveAndSetConfiguration(ConnectSocket, -6, 33000);
+        /*k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
         int msgType;
         std::vector<char> config_data;
         receiveMessage(ConnectSocket, msgType, config_data);
@@ -365,11 +437,12 @@ int main() {
         else
         {
             std::cerr << "Set device config fail: " << std::endl;
-        }
+        }*/
         //設定相機參數
         k4a_device_t device;
         struct CameraReturnStruct CRS;
-        if (CameraStartup(device, CRS.serial_str, CRS.calibration, config) < 0)
+        std::vector<char> raw_calibration;
+        if (CameraStartup(device, CRS.serial_str, CRS.calibration, raw_calibration, config, white_balance, exposure_time) < 0)
         {
             std::cerr << "Failed to Startup camera" << std::endl;
             CRS.start_up_success = false;
@@ -381,6 +454,7 @@ int main() {
             std::vector<char> CRS_data(sizeof(CRS));
             std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
             sendMessage(ConnectSocket, -3, CRS_data);
+            sendMessage(ConnectSocket, -4, raw_calibration);
         }
         /*k4a_device_stop_cameras(device);
         k4a_device_close(device);*/
