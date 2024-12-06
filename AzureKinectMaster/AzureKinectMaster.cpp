@@ -322,7 +322,7 @@ T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaul
         // 检查数据大小是否正确
         if (config_data.size() >= sizeof(T)) {
             std::memcpy(&config, config_data.data(), sizeof(T));
-            std::cout << "Set device config successfully: sync_mode " << config.wired_sync_mode << std::endl;
+            //std::cout << "Set device config successfully: sync_mode " << config.wired_sync_mode << std::endl;
         }
         else {
             std::cerr << "Configuration data size mismatch, using default config.\n";
