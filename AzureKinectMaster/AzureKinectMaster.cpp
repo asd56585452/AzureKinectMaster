@@ -235,7 +235,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 
     // 获取校准数据大小
     size_t calibration_data_size = 0;
-    if (k4a_device_get_raw_calibration(device, nullptr, &calibration_data_size) != K4A_RESULT_SUCCEEDED) {
+    if (k4a_device_get_raw_calibration(device, nullptr, &calibration_data_size) != K4A_BUFFER_RESULT_TOO_SMALL) {
         std::cerr << "Failed to get calibration data size." << std::endl;
         k4a_device_close(device);
         return -1;
