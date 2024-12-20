@@ -637,13 +637,14 @@ int main() {
                     std::vector<char> char_vector(buffer.begin(), buffer.end());
                     sendMessage(FileSocket, 2, char_vector);
                 }
-
+                fs::remove(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png");
                 {
                     std::vector<uchar> buffer;
                     cv::imencode(".png", frameData.depth_image, buffer);
                     std::vector<char> char_vector(buffer.begin(), buffer.end());
                     sendMessage(FileSocket, 3, char_vector);
                 }
+                fs::remove(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png");
             }
             });
 
