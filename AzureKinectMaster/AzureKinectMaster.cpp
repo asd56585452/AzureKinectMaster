@@ -15,9 +15,6 @@
 
 #define BROADCAST_PORT 8888   // 与服务器广播端口一致
 #define TIMEOUT_IN_MS 1000
-#define K4A_DEVICE_DEFAULT_OFFSET 0;
-#define MODE Sub
-#define MODE2 Sub
 #define FRAME_DELAY_US 10000
 //CV Mat轉換
 #include <stdexcept>
@@ -170,8 +167,7 @@ void receiveMessage(SOCKET socket, int& msgType, std::vector<char>& data) {
         totalReceived += iResult;
     }
 }
-
-int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration,std::vector<char> &raw_calibration, k4a_device_configuration_t config, int white_balance, int exposure_time) {
+int CameraOpen(k4a_device_t& device, std::string& serial_str) {
     uint32_t count = k4a_device_get_installed_count();
     if (count == 0)
     {
@@ -180,7 +176,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
     }
 
     // Open the first plugged in Kinect device
-    uint32_t camnum = K4A_DEVICE_DEFAULT + K4A_DEVICE_DEFAULT_OFFSET;
+    uint32_t camnum = 0;
     while (K4A_FAILED(k4a_device_open(camnum, &device)))
     {
         camnum++;
@@ -188,8 +184,39 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
         {
             std::cerr << "Failed to open k4a device!\n" << std::endl;
             return -1;
-        } 
+        }
     }
+
+    // Get the size of the serial number
+    size_t serial_size = 0;
+    k4a_device_get_serialnum(device, NULL, &serial_size);
+
+    // Allocate memory for the serial, then acquire it
+    char* serial = (char*)(malloc(serial_size));
+    k4a_device_get_serialnum(device, serial, &serial_size);
+    serial_str.assign(serial);
+    std::cout << "Opened device: " << serial_str << "\n";
+}
+
+int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration,std::vector<char> &raw_calibration, k4a_device_configuration_t config, int white_balance, int exposure_time) {
+    //uint32_t count = k4a_device_get_installed_count();
+    //if (count == 0)
+    //{
+    //    std::cerr << "No k4a devices attached!\n" << std::endl;
+    //    return -1;
+    //}
+
+    //// Open the first plugged in Kinect device
+    //uint32_t camnum = K4A_DEVICE_DEFAULT + K4A_DEVICE_DEFAULT_OFFSET;
+    //while (K4A_FAILED(k4a_device_open(camnum, &device)))
+    //{
+    //    camnum++;
+    //    if (camnum >= count)
+    //    {
+    //        std::cerr << "Failed to open k4a device!\n" << std::endl;
+    //        return -1;
+    //    } 
+    //}
 
     if (K4A_FAILED(k4a_device_set_color_control(
         device,
@@ -208,15 +235,15 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
         std::cerr << "Failed to set exposure time.\n";
     }
 
-    // Get the size of the serial number
-    size_t serial_size = 0;
-    k4a_device_get_serialnum(device, NULL, &serial_size);
+    //// Get the size of the serial number
+    //size_t serial_size = 0;
+    //k4a_device_get_serialnum(device, NULL, &serial_size);
 
-    // Allocate memory for the serial, then acquire it
-    char* serial = (char*)(malloc(serial_size));
-    k4a_device_get_serialnum(device, serial, &serial_size);
-    serial_str.assign(serial);
-    std::cout << "Opened device: " << serial_str << "\n";
+    //// Allocate memory for the serial, then acquire it
+    //char* serial = (char*)(malloc(serial_size));
+    //k4a_device_get_serialnum(device, serial, &serial_size);
+    //serial_str.assign(serial);
+    //std::cout << "Opened device: " << serial_str << "\n";
 
     // Start the camera with the given configuration
     if (K4A_FAILED(k4a_device_start_cameras(device, &config)))
@@ -416,11 +443,15 @@ int main() {
     std::cout << "Connected to server file transfer port." << std::endl;
 
     try {
-        //傳送Client相機類別
-        int camtype = MODE;
-        std::vector<char> camtype_data(sizeof(camtype));
-        std::memcpy(camtype_data.data(), &camtype, sizeof(camtype));
-        sendMessage(ConnectSocket, -1, camtype_data);
+        //傳送Client相機serial
+        k4a_device_t device;
+        struct CameraReturnStruct CRS;
+        CameraOpen(device, CRS.serial_str);
+        // 分配 vector 的大小與字串長度一致
+        std::vector<char> serial_str_data(CRS.serial_str.size());
+        // 使用 std::memcpy 拷貝字串內容
+        std::memcpy(serial_str_data.data(), CRS.serial_str.data(), CRS.serial_str.size());
+        sendMessage(ConnectSocket, -1, serial_str_data);
         //接收相機參數
         k4a_device_configuration_t config = receiveAndSetConfiguration(ConnectSocket, -2, K4A_DEVICE_CONFIG_INIT_DISABLE_ALL);
         int white_balance = receiveAndSetConfiguration(ConnectSocket, -5, 3500);
@@ -439,8 +470,6 @@ int main() {
             std::cerr << "Set device config fail: " << std::endl;
         }*/
         //設定相機參數
-        k4a_device_t device;
-        struct CameraReturnStruct CRS;
         std::vector<char> raw_calibration;
         if (CameraStartup(device, CRS.serial_str, CRS.calibration, raw_calibration, config, white_balance, exposure_time) < 0)
         {
