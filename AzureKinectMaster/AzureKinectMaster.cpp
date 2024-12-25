@@ -19,6 +19,51 @@
 //CV Mat轉換
 #include <stdexcept>
 
+cv::Mat k4a_to_cvmat(k4a_image_t k4a_image);
+
+template <typename T>
+class ThreadSafeQueue {
+public:
+    void push(const T& item);
+    T wait_and_pop();
+    T wait_and_front();
+    bool empty() const;
+};
+
+struct FrameData {
+    cv::Mat image;
+    cv::Mat depth_image;
+    uint64_t timestamp;
+};
+
+enum CameraType {
+    Master,
+    Sub,
+    Alone,
+};
+
+struct CameraReturnStruct {
+    bool start_up_success;
+    std::string serial_str;
+    k4a_calibration_t calibration;
+};
+
+void listenForServer(std::string& serverIP, int& serverPort);
+
+void sendMessage(SOCKET socket, int msgType, const std::vector<char>& data);
+
+void receiveMessage(SOCKET socket, int& msgType, std::vector<char>& data);
+
+int CameraOpen(k4a_device_t& device, std::string& serial_str);
+
+int CameraStartup(k4a_device_t& device, std::string& serial_str, k4a_calibration_t& calibration, std::vector<char>& raw_calibration, k4a_device_configuration_t config, int white_balance, int exposure_time);
+
+int switch_folder(std::string folderName, CameraReturnStruct CRS);
+
+template <typename T>
+T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaultConfig);
+
+
 cv::Mat k4a_to_cvmat(k4a_image_t k4a_image) {
     if (k4a_image == nullptr) {
         throw std::runtime_error("k4a_image_t is null");
@@ -199,24 +244,6 @@ int CameraOpen(k4a_device_t& device, std::string& serial_str) {
 }
 
 int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration,std::vector<char> &raw_calibration, k4a_device_configuration_t config, int white_balance, int exposure_time) {
-    //uint32_t count = k4a_device_get_installed_count();
-    //if (count == 0)
-    //{
-    //    std::cerr << "No k4a devices attached!\n" << std::endl;
-    //    return -1;
-    //}
-
-    //// Open the first plugged in Kinect device
-    //uint32_t camnum = K4A_DEVICE_DEFAULT + K4A_DEVICE_DEFAULT_OFFSET;
-    //while (K4A_FAILED(k4a_device_open(camnum, &device)))
-    //{
-    //    camnum++;
-    //    if (camnum >= count)
-    //    {
-    //        std::cerr << "Failed to open k4a device!\n" << std::endl;
-    //        return -1;
-    //    } 
-    //}
 
     if (K4A_FAILED(k4a_device_set_color_control(
         device,
@@ -234,16 +261,6 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
         exposure_time))) {
         std::cerr << "Failed to set exposure time.\n";
     }
-
-    //// Get the size of the serial number
-    //size_t serial_size = 0;
-    //k4a_device_get_serialnum(device, NULL, &serial_size);
-
-    //// Allocate memory for the serial, then acquire it
-    //char* serial = (char*)(malloc(serial_size));
-    //k4a_device_get_serialnum(device, serial, &serial_size);
-    //serial_str.assign(serial);
-    //std::cout << "Opened device: " << serial_str << "\n";
 
     // Start the camera with the given configuration
     if (K4A_FAILED(k4a_device_start_cameras(device, &config)))
@@ -289,49 +306,29 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 //創建工作目錄
 #include <filesystem> 
 namespace fs = std::filesystem;
-int switch_folder(std::string folderName , CameraReturnStruct CRS) {
-
-    // 創建資料夾
-    try {
-        if (fs::create_directory(folderName)) {
-            std::cout << "成功創建資料夾: " << folderName << std::endl;
-        }
-        else {
-            std::cerr << "資料夾已存在或創建失敗: " << folderName << std::endl;
-            //return 1;
-        }
+void createFolder(const std::string& folderPath) {
+    if (std::filesystem::create_directory(folderPath)) {
+        std::cout << "成功創建資料夾: " << folderPath << std::endl;
     }
-    catch (const fs::filesystem_error& e) {
+    else {
+        std::cerr << "資料夾已存在或創建失敗: " << folderPath << std::endl;
+    }
+}
+
+int switch_folder(const std::string& folderName, const CameraReturnStruct& CRS) {
+    try {
+        createFolder(folderName);
+        std::filesystem::current_path(folderName);
+        std::cout << "切換工作目錄至: " << std::filesystem::current_path() << std::endl;
+
+        createFolder(CRS.serial_str);
+        createFolder(CRS.serial_str + "/color");
+        createFolder(CRS.serial_str + "/depth");
+    }
+    catch (const std::filesystem::filesystem_error& e) {
         std::cerr << "文件系統錯誤: " << e.what() << std::endl;
         return 1;
     }
-
-    // 切換工作目錄
-    try {
-        fs::current_path(folderName);
-        std::cout << "切換工作目錄至: " << fs::current_path() << std::endl;
-    }
-    catch (const fs::filesystem_error& e) {
-        std::cerr << "無法切換工作目錄: " << e.what() << std::endl;
-        return 1;
-    }
-
-    if (fs::create_directory(CRS.serial_str)) {
-    }
-    else {
-        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
-    }
-    if (fs::create_directory(CRS.serial_str + "/color")) {
-    }
-    else {
-        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
-    }
-    if (fs::create_directory(CRS.serial_str + "/depth")) {
-    }
-    else {
-        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
-    }
-
     return 0;
 }
 
@@ -456,19 +453,6 @@ int main() {
         k4a_device_configuration_t config = receiveAndSetConfiguration(ConnectSocket, -2, K4A_DEVICE_CONFIG_INIT_DISABLE_ALL);
         int white_balance = receiveAndSetConfiguration(ConnectSocket, -5, 3500);
         int exposure_time = receiveAndSetConfiguration(ConnectSocket, -6, 33000);
-        /*k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
-        int msgType;
-        std::vector<char> config_data;
-        receiveMessage(ConnectSocket, msgType, config_data);
-        if (msgType == -2)
-        {
-            std::memcpy(&config, config_data.data(), sizeof(config));
-            std::cout << "Set device config: sync_mode " << config.wired_sync_mode << std::endl;
-        }
-        else
-        {
-            std::cerr << "Set device config fail: " << std::endl;
-        }*/
         //設定相機參數
         std::vector<char> raw_calibration;
         if (CameraStartup(device, CRS.serial_str, CRS.calibration, raw_calibration, config, white_balance, exposure_time) < 0)
@@ -485,8 +469,6 @@ int main() {
             sendMessage(ConnectSocket, -3, CRS_data);
             sendMessage(ConnectSocket, -4, raw_calibration);
         }
-        /*k4a_device_stop_cameras(device);
-        k4a_device_close(device);*/
         // 創建錄製線程
         ThreadSafeQueue<FrameData> queue;
         ThreadSafeQueue<FrameData> queue2;
@@ -545,35 +527,6 @@ int main() {
                 sendMessage(ConnectSocket, 3, frameData_timestamp_data);
 
                 queue2.push(frameData);
-
-                /* {
-                    std::vector<uchar> buffer;
-                    cv::imencode(".png", frameData.image, buffer);
-                    std::vector<char> char_vector(buffer.begin(), buffer.end());
-                    sendMessage(ConnectSocket, 4, char_vector);
-                }
-                
-
-                {
-                    std::vector<uchar> buffer;
-                    cv::imencode(".png", frameData.depth_image, buffer);
-                    std::vector<char> char_vector(buffer.begin(), buffer.end());
-                    sendMessage(ConnectSocket, 6, char_vector);
-                }*/
-
-                //std::vector<char> frameData_data(sizeof(frameData));
-                //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
-                //sendMessage(ConnectSocket, 3, frameData_data);
-                // 顯示圖片
-                //if (!frameData.image.empty()) {
-                //    cv::imshow("Frame", frameData.image);
-                //    std::cout << "Frame size: " << sizeof(frameData.image) << std::endl;
-
-                //    // 按下 ESC 鍵退出
-                //    if (cv::waitKey(1) == 27) {
-                //        break;
-                //    }
-                //}
             }
             });
         // 创建接收和发送线程
