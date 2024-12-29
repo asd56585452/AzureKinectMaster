@@ -381,6 +381,9 @@ T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaul
 int main() {
     while (true)
     {
+        k4a_device_t device;
+        SOCKET FileSocket;
+        SOCKET ConnectSocket;
         try{
 
         bool Stop = false;
@@ -411,7 +414,7 @@ int main() {
         std::cout << "Received server info: IP=" << serverIP << ", Port=" << serverPort << ", FilePort=" << serverFilePort << std::endl;
 
         // 创建套接字
-        SOCKET ConnectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        ConnectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (ConnectSocket == INVALID_SOCKET) {
             std::cerr << "socket failed: " << WSAGetLastError() << std::endl;
             WSACleanup();
@@ -436,7 +439,7 @@ int main() {
         std::cout << "Connected to server communication port." << std::endl;
 
         // 创建第二个套接字用于文件传输
-        SOCKET FileSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        FileSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (FileSocket == INVALID_SOCKET) {
             std::cerr << "File socket failed: " << WSAGetLastError() << std::endl;
             closesocket(ConnectSocket);
@@ -725,6 +728,10 @@ int main() {
         catch (const std::runtime_error& e) {
             std::cerr << "Main thread stopped: " << e.what() << std::endl;
         }
+        k4a_device_close(device);
+        closesocket(ConnectSocket);
+        closesocket(FileSocket);
+        WSACleanup();
     }
     return 0;
 }
