@@ -381,6 +381,8 @@ T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaul
 int main() {
     while (true)
     {
+        try{
+
         bool Stop = false;
         bool Start = false;
         WSADATA wsaData;
@@ -719,6 +721,10 @@ int main() {
         closesocket(ConnectSocket);
         closesocket(FileSocket);
         WSACleanup();
+        }
+        catch (const std::runtime_error& e) {
+            std::cerr << "Main thread stopped: " << e.what() << std::endl;
+        }
     }
     return 0;
 }
