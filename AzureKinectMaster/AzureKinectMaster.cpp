@@ -642,7 +642,7 @@ int main() {
         closesocket(FileSocket);
         WSACleanup();
         }
-        catch (const std::runtime_error& e) {
+        catch (const std::exception& e) {
             std::cerr << "Main thread stopped: " << e.what() << std::endl;
             k4a_device_stop_cameras(device);
             k4a_device_close(device);
@@ -650,10 +650,6 @@ int main() {
             closesocket(FileSocket);
             WSACleanup();
         }
-        k4a_device_close(device);
-        closesocket(ConnectSocket);
-        closesocket(FileSocket);
-        WSACleanup();
     }
     return 0;
 }
