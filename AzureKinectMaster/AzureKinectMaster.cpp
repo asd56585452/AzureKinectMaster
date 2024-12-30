@@ -121,8 +121,6 @@ struct CameraReturnStruct
     k4a_calibration_t calibration;
 };
 
-void listenForServer(std::string& serverIP, int& serverPort);
-
 void sendMessage(SOCKET socket, int msgType, const std::vector<char>& data) {
     int netMsgType = htonl(msgType);
     int netDataLength = htonl(static_cast<int>(data.size()));
@@ -346,8 +344,6 @@ int main() {
         int serverPort = 5555;
         int serverFilePort = 8888;
 
-        // 监听服务器广播，获取服务器 IP 和端口
-        //listenForServer(serverIP, serverPort);
 
         if (serverIP.empty() || serverPort == 0 || serverFilePort == 0) {
             WSACleanup();
@@ -654,58 +650,10 @@ int main() {
             closesocket(FileSocket);
             WSACleanup();
         }
+        k4a_device_close(device);
+        closesocket(ConnectSocket);
+        closesocket(FileSocket);
+        WSACleanup();
     }
     return 0;
-}
-
-void listenForServer(std::string& serverIP, int& serverPort) {
-    SOCKET ListenSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (ListenSocket == INVALID_SOCKET) {
-        std::cerr << "UDP socket failed: " << WSAGetLastError() << std::endl;
-        return;
-    }
-
-    sockaddr_in recvAddr;
-    recvAddr.sin_family = AF_INET;
-    recvAddr.sin_port = htons(BROADCAST_PORT);
-    recvAddr.sin_addr.s_addr = INADDR_ANY;
-
-    // 绑定套接字到广播端口
-    if (bind(ListenSocket, (SOCKADDR*)&recvAddr, sizeof(recvAddr)) == SOCKET_ERROR) {
-        std::cerr << "UDP bind failed: " << WSAGetLastError() << std::endl;
-        closesocket(ListenSocket);
-        return;
-    }
-
-    std::cout << "Listening for server broadcast on UDP port " << BROADCAST_PORT << "..." << std::endl;
-
-    char recvBuffer[256];
-    sockaddr_in senderAddr;
-    int senderAddrSize = sizeof(senderAddr);
-
-    // 设置超时时间
-    int timeout = 30000; // 30秒
-    setsockopt(ListenSocket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-
-    int recvResult = recvfrom(ListenSocket, recvBuffer, sizeof(recvBuffer) - 1, 0, (SOCKADDR*)&senderAddr, &senderAddrSize);
-    if (recvResult == SOCKET_ERROR) {
-        std::cerr << "recvfrom failed: " << WSAGetLastError() << std::endl;
-        closesocket(ListenSocket);
-        return;
-    }
-
-    recvBuffer[recvResult] = '\0';
-
-    // 解析接收到的服务器信息
-    std::string message(recvBuffer);
-    if (message.find("SERVER_INFO:") == 0) {
-        size_t pos1 = message.find(':', 12);
-        size_t pos2 = message.find(':', pos1 + 1);
-        if (pos1 != std::string::npos && pos2 != std::string::npos) {
-            serverIP = message.substr(12, pos1 - 12);
-            serverPort = std::stoi(message.substr(pos1 + 1));
-        }
-    }
-
-    closesocket(ListenSocket);
 }
