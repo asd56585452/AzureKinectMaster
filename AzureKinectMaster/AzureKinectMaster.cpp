@@ -130,15 +130,13 @@ void sendMessage(SOCKET socket, int msgType, const std::vector<char>& data) {
     // 发送消息类型
     int iResult = send(socket, (char*)&netMsgType, sizeof(int), 0);
     if (iResult == SOCKET_ERROR) {
-        std::cerr << "send failed (msgType): " << WSAGetLastError() << std::endl;
-        return;
+        throw std::runtime_error("send failed (msgType): "+std::to_string(WSAGetLastError()));
     }
 
     // 发送数据长度
     iResult = send(socket, (char*)&netDataLength, sizeof(int), 0);
     if (iResult == SOCKET_ERROR) {
-        std::cerr << "send failed (dataLength): " << WSAGetLastError() << std::endl;
-        return;
+        throw std::runtime_error("send failed (dataLength): "  + std::to_string(WSAGetLastError()));
     }
 
     // 发送实际数据
@@ -146,8 +144,7 @@ void sendMessage(SOCKET socket, int msgType, const std::vector<char>& data) {
     while (totalSent < data.size()) {
         iResult = send(socket, data.data() + totalSent, static_cast<int>(data.size()) - totalSent, 0);
         if (iResult == SOCKET_ERROR) {
-            std::cerr << "send failed (data): " << WSAGetLastError() << std::endl;
-            return;
+            throw std::runtime_error("send failed (data): " + std::to_string(WSAGetLastError()));
         }
         totalSent += iResult;
     }
@@ -187,8 +184,7 @@ int CameraOpen(k4a_device_t& device, std::string& serial_str) {
     uint32_t count = k4a_device_get_installed_count();
     if (count == 0)
     {
-        std::cerr << "No k4a devices attached!\n" << std::endl;
-        return -1;
+        throw std::runtime_error("No k4a devices attached!");
     }
 
     // Open the first plugged in Kinect device
@@ -198,8 +194,7 @@ int CameraOpen(k4a_device_t& device, std::string& serial_str) {
         camnum++;
         if (camnum >= count)
         {
-            std::cerr << "Failed to open k4a device!\n" << std::endl;
-            return -1;
+            throw std::runtime_error("Failed to open k4a device!");
         }
     }
 
@@ -215,31 +210,13 @@ int CameraOpen(k4a_device_t& device, std::string& serial_str) {
 }
 
 int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration_t &calibration,std::vector<char> &raw_calibration, k4a_device_configuration_t config, int white_balance, int exposure_time) {
-    //uint32_t count = k4a_device_get_installed_count();
-    //if (count == 0)
-    //{
-    //    std::cerr << "No k4a devices attached!\n" << std::endl;
-    //    return -1;
-    //}
-
-    //// Open the first plugged in Kinect device
-    //uint32_t camnum = K4A_DEVICE_DEFAULT + K4A_DEVICE_DEFAULT_OFFSET;
-    //while (K4A_FAILED(k4a_device_open(camnum, &device)))
-    //{
-    //    camnum++;
-    //    if (camnum >= count)
-    //    {
-    //        std::cerr << "Failed to open k4a device!\n" << std::endl;
-    //        return -1;
-    //    } 
-    //}
 
     if (K4A_FAILED(k4a_device_set_color_control(
         device,
         K4A_COLOR_CONTROL_WHITEBALANCE,
         K4A_COLOR_CONTROL_MODE_MANUAL,
         white_balance))) {
-        std::cerr << "Failed to set white balance.\n";
+        throw std::runtime_error("Failed to set white balance.");
     }
 
     // 设置曝光时间为 20000us
@@ -248,40 +225,25 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
         K4A_COLOR_CONTROL_EXPOSURE_TIME_ABSOLUTE,
         K4A_COLOR_CONTROL_MODE_MANUAL,
         exposure_time))) {
-        std::cerr << "Failed to set exposure time.\n";
+        throw std::runtime_error("Failed to set exposure time.");
     }
-
-    //// Get the size of the serial number
-    //size_t serial_size = 0;
-    //k4a_device_get_serialnum(device, NULL, &serial_size);
-
-    //// Allocate memory for the serial, then acquire it
-    //char* serial = (char*)(malloc(serial_size));
-    //k4a_device_get_serialnum(device, serial, &serial_size);
-    //serial_str.assign(serial);
-    //std::cout << "Opened device: " << serial_str << "\n";
 
     // Start the camera with the given configuration
     if (K4A_FAILED(k4a_device_start_cameras(device, &config)))
     {
-        std::cerr << "Failed to start cameras!\n" << std::endl;
-        return -1;
+        throw std::runtime_error("Failed to start cameras!");
     }
 
     // Get calibration data
     if (K4A_FAILED(k4a_device_get_calibration(device, config.depth_mode, config.color_resolution, &calibration)))
     {
-        std::cerr << "Failed to get calibration\n" << std::endl;
-        k4a_device_close(device);
-        return -1;
+        throw std::runtime_error("Failed to get calibration");
     }
 
     // 获取校准数据大小
     size_t calibration_data_size = 0;
     if (k4a_device_get_raw_calibration(device, nullptr, &calibration_data_size) != K4A_BUFFER_RESULT_TOO_SMALL) {
-        std::cerr << "Failed to get calibration data size." << std::endl;
-        k4a_device_close(device);
-        return -1;
+        throw std::runtime_error("Failed to get calibration data size.");
     }
 
     // 创建缓冲区以存储校准数据
@@ -289,9 +251,7 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 
     // 获取校准数据
     if (k4a_device_get_raw_calibration(device, calibration_data.data(), &calibration_data_size) != K4A_RESULT_SUCCEEDED) {
-        std::cerr << "Failed to get calibration data." << std::endl;
-        k4a_device_close(device);
-        return -1;
+        throw std::runtime_error("Failed to get calibration data.");
     }
 
     raw_calibration.resize(calibration_data.size());
@@ -307,45 +267,30 @@ int CameraStartup(k4a_device_t &device, std::string &serial_str, k4a_calibration
 namespace fs = std::filesystem;
 int switch_folder(std::string folderName , CameraReturnStruct CRS) {
 
-    // 創建資料夾
-    try {
-        if (fs::create_directory(folderName)) {
-            std::cout << "成功創建資料夾: " << folderName << std::endl;
-        }
-        else {
-            std::cerr << "資料夾已存在或創建失敗: " << folderName << std::endl;
-            //return 1;
-        }
+    if (fs::create_directory(folderName)) {
+        std::cout << "成功創建資料夾: " << folderName << std::endl;
     }
-    catch (const fs::filesystem_error& e) {
-        std::cerr << "文件系統錯誤: " << e.what() << std::endl;
-        return 1;
+    else {
+        throw std::runtime_error("資料夾已存在或創建失敗"+folderName);
     }
 
-    // 切換工作目錄
-    try {
-        fs::current_path(folderName);
-        std::cout << "切換工作目錄至: " << fs::current_path() << std::endl;
-    }
-    catch (const fs::filesystem_error& e) {
-        std::cerr << "無法切換工作目錄: " << e.what() << std::endl;
-        return 1;
-    }
+    fs::current_path(folderName);
+    std::cout << "切換工作目錄至: " << fs::current_path() << std::endl;
 
     if (fs::create_directory(CRS.serial_str)) {
     }
     else {
-        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
+        throw std::runtime_error("資料夾已存在或創建失敗" + CRS.serial_str);
     }
     if (fs::create_directory(CRS.serial_str + "/color")) {
     }
     else {
-        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
+        throw std::runtime_error("資料夾已存在或創建失敗" + CRS.serial_str);
     }
     if (fs::create_directory(CRS.serial_str + "/depth")) {
     }
     else {
-        std::cerr << "資料夾已存在或創建失敗: " << CRS.serial_str << std::endl;
+        throw std::runtime_error("資料夾已存在或創建失敗" + CRS.serial_str);
     }
 
     return 0;
@@ -368,11 +313,11 @@ T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaul
             //std::cout << "Set device config successfully: sync_mode " << config.wired_sync_mode << std::endl;
         }
         else {
-            std::cerr << "Configuration data size mismatch, using default config.\n";
+            throw std::runtime_error("Configuration data size mismatch, using default config.");
         }
     }
     else {
-        std::cerr << "Receive message failed (msgType: " << msgType << "), using default config.\n";
+        throw std::runtime_error("Receive message failed (msgType: " + std::to_string(msgType) + "), using default config.");
     }
 
     return config;
@@ -381,6 +326,9 @@ T receiveAndSetConfiguration(SOCKET connectSocket, int msgTypeE, const T& defaul
 int main() {
     while (true)
     {
+        k4a_device_t device=NULL;
+        SOCKET ConnectSocket{};
+        SOCKET FileSocket{};
         try{
 
         bool Stop = false;
@@ -391,8 +339,7 @@ int main() {
         // 初始化 Winsock
         iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
         if (iResult != 0) {
-            std::cerr << "WSAStartup failed: " << iResult << std::endl;
-            return 1;
+            throw std::runtime_error("WSAStartup failed");
         }
 
         std::string serverIP = "140.114.24.234";
@@ -403,19 +350,18 @@ int main() {
         //listenForServer(serverIP, serverPort);
 
         if (serverIP.empty() || serverPort == 0 || serverFilePort == 0) {
-            std::cerr << "Failed to receive server info." << std::endl;
             WSACleanup();
-            return 1;
+            throw std::runtime_error("Failed to receive server info.");
         }
 
         std::cout << "Received server info: IP=" << serverIP << ", Port=" << serverPort << ", FilePort=" << serverFilePort << std::endl;
 
         // 创建套接字
-        SOCKET ConnectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        ConnectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (ConnectSocket == INVALID_SOCKET) {
             std::cerr << "socket failed: " << WSAGetLastError() << std::endl;
             WSACleanup();
-            return 1;
+            throw std::runtime_error("socket failed: ");
         }
 
         // 设置服务器地址和端口
@@ -430,18 +376,18 @@ int main() {
             std::cerr << "connect failed: " << WSAGetLastError() << std::endl;
             closesocket(ConnectSocket);
             WSACleanup();
-            return 1;
+            throw std::runtime_error("connect failed: ");
         }
 
         std::cout << "Connected to server communication port." << std::endl;
 
         // 创建第二个套接字用于文件传输
-        SOCKET FileSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        FileSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (FileSocket == INVALID_SOCKET) {
             std::cerr << "File socket failed: " << WSAGetLastError() << std::endl;
             closesocket(ConnectSocket);
             WSACleanup();
-            return 1;
+            throw std::runtime_error("File socket failed: ");
         }
 
         // 设置服务器地址和文件传输端口
@@ -457,265 +403,243 @@ int main() {
             closesocket(FileSocket);
             closesocket(ConnectSocket);
             WSACleanup();
-            return 1;
+            throw std::runtime_error("connect failed (serverFilePort):");
         }
 
         std::cout << "Connected to server file transfer port." << std::endl;
+        //傳送Client相機serial
+        struct CameraReturnStruct CRS;
+        CameraOpen(device, CRS.serial_str);
+        // 分配 vector 的大小與字串長度一致
+        std::vector<char> serial_str_data(CRS.serial_str.size());
+        // 使用 std::memcpy 拷貝字串內容
+        std::memcpy(serial_str_data.data(), CRS.serial_str.data(), CRS.serial_str.size());
+        sendMessage(ConnectSocket, -1, serial_str_data);
+        //接收相機參數
+        k4a_device_configuration_t config = receiveAndSetConfiguration(ConnectSocket, -2, K4A_DEVICE_CONFIG_INIT_DISABLE_ALL);
+        int white_balance = receiveAndSetConfiguration(ConnectSocket, -5, 3500);
+        int exposure_time = receiveAndSetConfiguration(ConnectSocket, -6, 33000);
+        //設定相機參數
+        std::vector<char> raw_calibration;
+        if (CameraStartup(device, CRS.serial_str, CRS.calibration, raw_calibration, config, white_balance, exposure_time) < 0)
+        {
+            std::cerr << "Failed to Startup camera" << std::endl;
+            CRS.start_up_success = false;
+        }
+        else
+        {
+            CRS.start_up_success = true;
+            // 回報設定成功
+            std::vector<char> CRS_data(sizeof(CRS));
+            std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
+            sendMessage(ConnectSocket, -3, CRS_data);
+            sendMessage(ConnectSocket, -4, raw_calibration);
+        }
+        // 創建錄製線程
+        ThreadSafeQueue<FrameData> queue;
+        ThreadSafeQueue<FrameData> queue2;
+        ThreadSafeQueue<uint64_t> queuePath;
+        std::thread recordThread([&queue, device, &Stop, &Start]() {
+            while (!Start) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            while (!Stop) {
+                k4a_capture_t capture = NULL;
+                switch (k4a_device_get_capture(device, &capture, TIMEOUT_IN_MS))
+                {
+                case K4A_WAIT_RESULT_SUCCEEDED:
+                    break;
+                case K4A_WAIT_RESULT_TIMEOUT:
+                    printf("Timed out waiting for a capture\n");
+                    continue;
+                case K4A_WAIT_RESULT_FAILED:
+                    printf("Failed to read a capture\n");
+                    return 1;
+                }
 
-        try {
-            //傳送Client相機serial
-            k4a_device_t device;
-            struct CameraReturnStruct CRS;
-            CameraOpen(device, CRS.serial_str);
-            // 分配 vector 的大小與字串長度一致
-            std::vector<char> serial_str_data(CRS.serial_str.size());
-            // 使用 std::memcpy 拷貝字串內容
-            std::memcpy(serial_str_data.data(), CRS.serial_str.data(), CRS.serial_str.size());
-            sendMessage(ConnectSocket, -1, serial_str_data);
-            //接收相機參數
-            k4a_device_configuration_t config = receiveAndSetConfiguration(ConnectSocket, -2, K4A_DEVICE_CONFIG_INIT_DISABLE_ALL);
-            int white_balance = receiveAndSetConfiguration(ConnectSocket, -5, 3500);
-            int exposure_time = receiveAndSetConfiguration(ConnectSocket, -6, 33000);
-            /*k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
-            int msgType;
-            std::vector<char> config_data;
-            receiveMessage(ConnectSocket, msgType, config_data);
-            if (msgType == -2)
-            {
-                std::memcpy(&config, config_data.data(), sizeof(config));
-                std::cout << "Set device config: sync_mode " << config.wired_sync_mode << std::endl;
+                // 处理彩色图像
+                k4a_image_t color_image = k4a_capture_get_color_image(capture);
+                k4a_image_t depth_image = k4a_capture_get_depth_image(capture);
+                if (color_image != NULL && depth_image != NULL)
+                {
+                    uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
+                    // 将K4A图像转换为OpenCV Mat
+                    cv::Mat color_mat = k4a_to_cvmat(color_image);
+                    cv::Mat depth_mat = k4a_to_cvmat(depth_image);
+
+                    queue.push({ color_mat.clone(),depth_mat.clone(), timestamp });
+                    // 释放彩色图像
+                    k4a_image_release(color_image);
+                    k4a_image_release(depth_image);
+                }
+
+                // 释放捕获
+                k4a_capture_release(capture);
             }
-            else
-            {
-                std::cerr << "Set device config fail: " << std::endl;
-            }*/
-            //設定相機參數
-            std::vector<char> raw_calibration;
-            if (CameraStartup(device, CRS.serial_str, CRS.calibration, raw_calibration, config, white_balance, exposure_time) < 0)
-            {
-                std::cerr << "Failed to Startup camera" << std::endl;
-                CRS.start_up_success = false;
-            }
-            else
-            {
-                CRS.start_up_success = true;
-                // 回報設定成功
-                std::vector<char> CRS_data(sizeof(CRS));
-                std::memcpy(CRS_data.data(), &CRS, sizeof(CRS));
-                sendMessage(ConnectSocket, -3, CRS_data);
-                sendMessage(ConnectSocket, -4, raw_calibration);
-            }
-            /*k4a_device_stop_cameras(device);
-            k4a_device_close(device);*/
-            // 創建錄製線程
-            ThreadSafeQueue<FrameData> queue;
-            ThreadSafeQueue<FrameData> queue2;
-            ThreadSafeQueue<uint64_t> queuePath;
-            std::thread recordThread([&queue, device, &Stop, &Start]() {
+            k4a_device_stop_cameras(device);
+            k4a_device_close(device);
+            });
+        // 創建圖像資料發送線程
+        std::thread recordSendThread([&queue, &queue2, ConnectSocket, &Stop, &Start]() {
+            try {
                 while (!Start) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
                 while (!Stop) {
-                    k4a_capture_t capture = NULL;
-                    switch (k4a_device_get_capture(device, &capture, TIMEOUT_IN_MS))
+                    // 從隊列中取出 FrameData
+                    FrameData frameData = queue.wait_and_pop();
+
+                    std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
+                    std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
+                    sendMessage(ConnectSocket, 3, frameData_timestamp_data);
+
+                    queue2.push(frameData);
+
+                    /* {
+                        std::vector<uchar> buffer;
+                        cv::imencode(".png", frameData.image, buffer);
+                        std::vector<char> char_vector(buffer.begin(), buffer.end());
+                        sendMessage(ConnectSocket, 4, char_vector);
+                    }
+
+
                     {
-                    case K4A_WAIT_RESULT_SUCCEEDED:
-                        break;
-                    case K4A_WAIT_RESULT_TIMEOUT:
-                        printf("Timed out waiting for a capture\n");
-                        continue;
-                    case K4A_WAIT_RESULT_FAILED:
-                        printf("Failed to read a capture\n");
-                        return 1;
-                    }
+                        std::vector<uchar> buffer;
+                        cv::imencode(".png", frameData.depth_image, buffer);
+                        std::vector<char> char_vector(buffer.begin(), buffer.end());
+                        sendMessage(ConnectSocket, 6, char_vector);
+                    }*/
 
-                    // 处理彩色图像
-                    k4a_image_t color_image = k4a_capture_get_color_image(capture);
-                    k4a_image_t depth_image = k4a_capture_get_depth_image(capture);
-                    if (color_image != NULL && depth_image != NULL)
-                    {
-                        uint64_t timestamp = k4a_image_get_device_timestamp_usec(color_image);
-                        // 将K4A图像转换为OpenCV Mat
-                        cv::Mat color_mat = k4a_to_cvmat(color_image);
-                        cv::Mat depth_mat = k4a_to_cvmat(depth_image);
+                    //std::vector<char> frameData_data(sizeof(frameData));
+                    //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
+                    //sendMessage(ConnectSocket, 3, frameData_data);
+                    // 顯示圖片
+                    //if (!frameData.image.empty()) {
+                    //    cv::imshow("Frame", frameData.image);
+                    //    std::cout << "Frame size: " << sizeof(frameData.image) << std::endl;
 
-                        queue.push({ color_mat.clone(),depth_mat.clone(), timestamp });
-                        // 释放彩色图像
-                        k4a_image_release(color_image);
-                        k4a_image_release(depth_image);
-                    }
-
-                    // 释放捕获
-                    k4a_capture_release(capture);
+                    //    // 按下 ESC 鍵退出
+                    //    if (cv::waitKey(1) == 27) {
+                    //        break;
+                    //    }
+                    //}
                 }
-                k4a_device_stop_cameras(device);
-                k4a_device_close(device);
-                });
-            // 創建圖像資料發送線程
-            std::thread recordSendThread([&queue, &queue2, ConnectSocket, &Stop, &Start]() {
-                try {
-                    while (!Start) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
-                    while (!Stop) {
-                        // 從隊列中取出 FrameData
-                        FrameData frameData = queue.wait_and_pop();
+            }
+            catch (const std::runtime_error& e) {
+                std::cerr << "Worker thread stopped: " << e.what() << std::endl;
+            }
+            });
+        // 创建接收和发送线程
+        std::thread recvThread([ConnectSocket, &Stop, &Start, &queue, &queue2, &CRS, &queuePath]() {
+            while (!Stop) {
+                int msgType;
+                std::vector<char> data;
+                receiveMessage(ConnectSocket, msgType, data);
 
-                        std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
-                        std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
-                        sendMessage(ConnectSocket, 3, frameData_timestamp_data);
-
-                        queue2.push(frameData);
-
-                        /* {
-                            std::vector<uchar> buffer;
-                            cv::imencode(".png", frameData.image, buffer);
-                            std::vector<char> char_vector(buffer.begin(), buffer.end());
-                            sendMessage(ConnectSocket, 4, char_vector);
-                        }
-
-
-                        {
-                            std::vector<uchar> buffer;
-                            cv::imencode(".png", frameData.depth_image, buffer);
-                            std::vector<char> char_vector(buffer.begin(), buffer.end());
-                            sendMessage(ConnectSocket, 6, char_vector);
-                        }*/
-
-                        //std::vector<char> frameData_data(sizeof(frameData));
-                        //std::memcpy(frameData_data.data(), &frameData, sizeof(frameData));
-                        //sendMessage(ConnectSocket, 3, frameData_data);
-                        // 顯示圖片
-                        //if (!frameData.image.empty()) {
-                        //    cv::imshow("Frame", frameData.image);
-                        //    std::cout << "Frame size: " << sizeof(frameData.image) << std::endl;
-
-                        //    // 按下 ESC 鍵退出
-                        //    if (cv::waitKey(1) == 27) {
-                        //        break;
-                        //    }
-                        //}
-                    }
+                if (msgType == 1) { // 文本消息
+                    std::string text(data.begin(), data.end());
+                    std::cout << "Received text from server: " << text << std::endl;
                 }
-                catch (const std::runtime_error& e) {
-                    std::cerr << "Worker thread stopped: " << e.what() << std::endl;
-                }
-                });
-            // 创建接收和发送线程
-            std::thread recvThread([ConnectSocket, &Stop, &Start, &queue, &queue2, &CRS, &queuePath]() {
-                while (!Stop) {
-                    int msgType;
-                    std::vector<char> data;
-                    receiveMessage(ConnectSocket, msgType, data);
-
-                    if (msgType == 1) { // 文本消息
-                        std::string text(data.begin(), data.end());
-                        std::cout << "Received text from server: " << text << std::endl;
-                    }
-                    else if (msgType == 2) { // 文件数据
-                        std::string fileName = "received_file_from_server";
-                        std::ofstream outFile(fileName, std::ios::binary);
-                        if (outFile) {
-                            outFile.write(data.data(), data.size());
-                            outFile.close();
-                            std::cout << "Received file from server saved as " << fileName << std::endl;
-                        }
-                        else {
-                            std::cerr << "Failed to save file from server" << std::endl;
-                        }
-                    }
-                    else if (msgType == 5) { // Camera cmd
-                        std::string cmd(data.begin(), data.end());
-                        if (cmd == "stop")
-                        {
-                            std::cout << "Stop Camera " << std::endl;
-                            Stop = true;
-                            queue.stop();
-                            queuePath.stop();
-                        }
-                        else if (cmd == "start")
-                        {
-                            std::cout << "Start Camera " << std::endl;
-                            Start = true;
-                        }
-                    }
-                    else if (msgType == 7) { // Update delete time stamp
-                        FrameData frameDatat;
-                        std::memcpy(&frameDatat.timestamp, data.data(), sizeof(frameDatat.timestamp));
-                        while (queue2.wait_and_front().timestamp <= frameDatat.timestamp)
-                        {
-                            FrameData frameData = queue2.wait_and_pop();
-                            if (frameData.timestamp < recording_stop_timestamp + FRAME_DELAY_US && frameData.timestamp > recording_start_timestamp + FRAME_DELAY_US)
-                            {
-                                cv::imwrite(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", frameData.image);
-                                cv::imwrite(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", frameData.depth_image);
-                                queuePath.push(frameData.timestamp);
-                            }
-                        }
-                    }
-                    else if (msgType == 8) { // Update start time stamp
-                        std::memcpy(&recording_start_timestamp, data.data(), sizeof(recording_start_timestamp));
-                        std::cout << "Update start time stamp" << std::endl;
-                    }
-                    else if (msgType == 9) { // Update stop time stamp
-                        std::memcpy(&recording_stop_timestamp, data.data(), sizeof(recording_stop_timestamp));
-                        std::cout << "Update stop time stamp" << std::endl;
-                    }
-                    else if (msgType == 10) { // Switch Floder
-                        std::string floderName(data.begin(), data.end());
-                        switch_folder(floderName, CRS);
-                    }
-                    else if (msgType == 11) { // Switch Floder
-                        std::memcpy(&camera_num, data.data(), sizeof(camera_num));
-                        std::cout << "Update camera_num" << std::endl;
+                else if (msgType == 2) { // 文件数据
+                    std::string fileName = "received_file_from_server";
+                    std::ofstream outFile(fileName, std::ios::binary);
+                    if (outFile) {
+                        outFile.write(data.data(), data.size());
+                        outFile.close();
+                        std::cout << "Received file from server saved as " << fileName << std::endl;
                     }
                     else {
-                        std::cerr << "Unknown message type from server: " << msgType << std::endl;
+                        std::cerr << "Failed to save file from server" << std::endl;
                     }
                 }
-                });
-
-            std::thread sendFileThread([FileSocket, &Stop, &CRS, &queuePath]() {
-
-                try {
-                    while (!Stop) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100 * camera_num));
-                        FrameData frameData;
-                        frameData.timestamp = queuePath.wait_and_pop();
-                        frameData.image = cv::imread(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
-                        frameData.depth_image = cv::imread(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
-                        std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
-                        std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
-                        sendMessage(FileSocket, 1, frameData_timestamp_data);
-                        {
-                            std::vector<uchar> buffer;
-                            cv::imencode(".png", frameData.image, buffer);
-                            std::vector<char> char_vector(buffer.begin(), buffer.end());
-                            sendMessage(FileSocket, 2, char_vector);
-                        }
-                        fs::remove(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png");
-                        {
-                            std::vector<uchar> buffer;
-                            cv::imencode(".png", frameData.depth_image, buffer);
-                            std::vector<char> char_vector(buffer.begin(), buffer.end());
-                            sendMessage(FileSocket, 3, char_vector);
-                        }
-                        fs::remove(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png");
+                else if (msgType == 5) { // Camera cmd
+                    std::string cmd(data.begin(), data.end());
+                    if (cmd == "stop")
+                    {
+                        std::cout << "Stop Camera " << std::endl;
+                        Stop = true;
+                        queue.stop();
+                        queuePath.stop();
+                    }
+                    else if (cmd == "start")
+                    {
+                        std::cout << "Start Camera " << std::endl;
+                        Start = true;
                     }
                 }
-                catch (const std::runtime_error& e) {
-                    std::cerr << "Worker thread stopped: " << e.what() << std::endl;
+                else if (msgType == 7) { // Update delete time stamp
+                    FrameData frameDatat;
+                    std::memcpy(&frameDatat.timestamp, data.data(), sizeof(frameDatat.timestamp));
+                    while (queue2.wait_and_front().timestamp <= frameDatat.timestamp)
+                    {
+                        FrameData frameData = queue2.wait_and_pop();
+                        if (frameData.timestamp < recording_stop_timestamp + FRAME_DELAY_US && frameData.timestamp > recording_start_timestamp + FRAME_DELAY_US)
+                        {
+                            cv::imwrite(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", frameData.image);
+                            cv::imwrite(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", frameData.depth_image);
+                            queuePath.push(frameData.timestamp);
+                        }
+                    }
                 }
-                });
+                else if (msgType == 8) { // Update start time stamp
+                    std::memcpy(&recording_start_timestamp, data.data(), sizeof(recording_start_timestamp));
+                    std::cout << "Update start time stamp" << std::endl;
+                }
+                else if (msgType == 9) { // Update stop time stamp
+                    std::memcpy(&recording_stop_timestamp, data.data(), sizeof(recording_stop_timestamp));
+                    std::cout << "Update stop time stamp" << std::endl;
+                }
+                else if (msgType == 10) { // Switch Floder
+                    std::string floderName(data.begin(), data.end());
+                    switch_folder(floderName, CRS);
+                }
+                else if (msgType == 11) { // Switch Floder
+                    std::memcpy(&camera_num, data.data(), sizeof(camera_num));
+                    std::cout << "Update camera_num" << std::endl;
+                }
+                else {
+                    std::cerr << "Unknown message type from server: " << msgType << std::endl;
+                }
+            }
+            });
 
-            recvThread.join();
-            sendFileThread.join();
-            recordSendThread.join();
-            recordThread.join();
-        }
-        catch (const std::exception& e) {
-            std::cerr << "Disconnected from server: " << e.what() << std::endl;
-        }
+        std::thread sendFileThread([FileSocket, &Stop, &CRS, &queuePath]() {
+
+            try {
+                while (!Stop) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100 * camera_num));
+                    FrameData frameData;
+                    frameData.timestamp = queuePath.wait_and_pop();
+                    frameData.image = cv::imread(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
+                    frameData.depth_image = cv::imread(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
+                    std::vector<char> frameData_timestamp_data(sizeof(frameData.timestamp));
+                    std::memcpy(frameData_timestamp_data.data(), &frameData.timestamp, sizeof(frameData.timestamp));
+                    sendMessage(FileSocket, 1, frameData_timestamp_data);
+                    {
+                        std::vector<uchar> buffer;
+                        cv::imencode(".png", frameData.image, buffer);
+                        std::vector<char> char_vector(buffer.begin(), buffer.end());
+                        sendMessage(FileSocket, 2, char_vector);
+                    }
+                    fs::remove(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png");
+                    {
+                        std::vector<uchar> buffer;
+                        cv::imencode(".png", frameData.depth_image, buffer);
+                        std::vector<char> char_vector(buffer.begin(), buffer.end());
+                        sendMessage(FileSocket, 3, char_vector);
+                    }
+                    fs::remove(CRS.serial_str + "/depth/" + std::to_string(frameData.timestamp) + ".png");
+                }
+            }
+            catch (const std::runtime_error& e) {
+                std::cerr << "Worker thread stopped: " << e.what() << std::endl;
+            }
+            });
+
+        recvThread.join();
+        sendFileThread.join();
+        recordSendThread.join();
+        recordThread.join();
 
         // 关闭套接字
         closesocket(ConnectSocket);
@@ -724,6 +648,11 @@ int main() {
         }
         catch (const std::runtime_error& e) {
             std::cerr << "Main thread stopped: " << e.what() << std::endl;
+            k4a_device_stop_cameras(device);
+            k4a_device_close(device);
+            closesocket(ConnectSocket);
+            closesocket(FileSocket);
+            WSACleanup();
         }
     }
     return 0;
