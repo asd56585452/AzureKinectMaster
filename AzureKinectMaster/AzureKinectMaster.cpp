@@ -652,7 +652,7 @@ int main() {
 
 
             while (!Stop) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100*camera_num));
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000*camera_num));
                 FrameData frameData;
                 frameData.timestamp = queuePath.wait_and_pop();
                 frameData.image = cv::imread(CRS.serial_str + "/color/" + std::to_string(frameData.timestamp) + ".png", cv::IMREAD_UNCHANGED);
