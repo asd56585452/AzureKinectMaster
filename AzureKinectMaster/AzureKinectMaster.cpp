@@ -1,5 +1,7 @@
 ﻿#include <boost/asio.hpp>
 #include <iostream>
+#include <filesystem> 
+#include <fstream>
 #include <k4a/k4a.h>
 #include <k4arecord/record.h>
 #include <k4arecord/playback.h>
@@ -18,9 +20,11 @@ std::string camera_name = "000835513412";
 int camera_id = -1;
 
 void Print_error(std::string s);
+int Switch_working_environments();
 int Connect_to_host();
 int Get_camera();
 int Recvive_camera_id();
+int Commands_recvive();
 int ReceiveString(std::string& client_message);
 int SendString(std::string& host_message);
 
@@ -31,22 +35,11 @@ int SendString(std::string& host_message);
     }
 
 int main() {
-    if (Connect_to_host() == 1)
-    {
-        Print_error("Connect_to_host");
-        return 1;
-    }
-    if (Get_camera() == 1)
-    {
-        Print_error("Get_camera");
-        return 1;
-    }
-    if (Recvive_camera_id() == 1)
-    {
-        Print_error("Recvive_camera_id");
-        return 1;
-    }
-    std::cout << camera_id << std::endl;
+    CHECK_AND_RETURN(Connect_to_host());
+    CHECK_AND_RETURN(Get_camera());
+    CHECK_AND_RETURN(Switch_working_environments());
+    CHECK_AND_RETURN(Recvive_camera_id());
+    CHECK_AND_RETURN(Commands_recvive());
     return 0;
 }
 
@@ -54,10 +47,25 @@ void Print_error(std::string s) {
     std::cerr << s << " has error" << std::endl;
 }
 
+int Switch_working_environments()//Create directories and switch working environments by camera_name
+{
+    try
+    {
+        if (!std::filesystem::exists(camera_name))
+            std::filesystem::create_directory(camera_name);
+        std::filesystem::current_path(camera_name);
+        return 0;
+    }
+    catch (...)
+    {
+        return 1;
+    }
+}
+
 int Connect_to_host()
 {
     try {
-        HOST.connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), 8080));
+        HOST.connect(tcp::endpoint(boost::asio::ip::make_address("127.0.0.1"), 8080));//140.114.24.234
         return 0;
     }
     catch (...) {
@@ -107,6 +115,8 @@ int Recvive_camera_id()
     try {
         std::string s = camera_name;
         CHECK_AND_RETURN(SendString(s));
+        s = std::to_string(camnum);
+        CHECK_AND_RETURN(SendString(s));
         s = "";
         CHECK_AND_RETURN(ReceiveString(s));
         camera_id = std::stoi(s);
@@ -116,6 +126,14 @@ int Recvive_camera_id()
     catch (...) {
         return 1;
     }
+}
+
+int Commands_recvive()
+{
+    std::string command;
+    CHECK_AND_RETURN(ReceiveString(command));
+    std::string s = "success";
+    CHECK_AND_RETURN(SendString(s));
 }
 
 int ReceiveString(std::string& client_message)
