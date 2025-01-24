@@ -14,7 +14,7 @@ boost::asio::io_context io_context;
 tcp::socket HOST(io_context);
 k4a_device_t device;
 uint32_t camnum = 0;
-std::string camera_name = "";
+std::string camera_name = "000835513412";
 int camera_id = -1;
 
 void Print_error(std::string s);
@@ -24,22 +24,29 @@ int Recvive_camera_id();
 int ReceiveString(std::string& client_message);
 int SendString(std::string& host_message);
 
+#define CHECK_AND_RETURN(func) \
+    if ((func) == 1) { \
+        Print_error(#func); \
+        return 1; \
+    }
+
 int main() {
     if (Connect_to_host() == 1)
     {
         Print_error("Connect_to_host");
         return 1;
     }
-    /*if (Get_camera() == 1)
+    if (Get_camera() == 1)
     {
         Print_error("Get_camera");
         return 1;
-    }*/
+    }
     if (Recvive_camera_id() == 1)
     {
         Print_error("Recvive_camera_id");
         return 1;
     }
+    std::cout << camera_id << std::endl;
     return 0;
 }
 
@@ -69,6 +76,7 @@ int Get_camera()
             return 1;
         }
         // Open the first plugged in Kinect device
+        camnum = 0;
         while (K4A_FAILED(k4a_device_open(camnum, &device)))
         {
             camnum++;
@@ -97,8 +105,12 @@ int Get_camera()
 int Recvive_camera_id()
 {
     try {
-        std::string s = "0123456";
-        SendString(s);
+        std::string s = camera_name;
+        CHECK_AND_RETURN(SendString(s));
+        s = "";
+        CHECK_AND_RETURN(ReceiveString(s));
+        camera_id = std::stoi(s);
+        k4a_device_close(device);
         return 0;
     }
     catch (...) {
