@@ -5,6 +5,7 @@
 #include <k4a/k4a.h>
 #include <k4arecord/record.h>
 #include <k4arecord/playback.h>
+#include <thread>
 
 /*
 連線到伺服器
@@ -132,8 +133,25 @@ int Commands_recvive()
 {
     std::string command;
     CHECK_AND_RETURN(ReceiveString(command));
+    std::cout << command << std::endl;
     std::string s = "success";
     CHECK_AND_RETURN(SendString(s));
+}
+
+void ReadUntilNewline(boost::asio::ip::tcp::socket& socket, boost::asio::streambuf& buffer, char c)
+{
+    char ch;  // 用來儲存每次讀取的字元
+
+    while (true)
+    {
+        boost::asio::read(socket, boost::asio::buffer(&ch, 1));  // 每次讀取一個字元
+        buffer.sputc(ch);  // 將字元寫入 streambuf
+
+        if (ch == c)  // 如果讀到換行符，則停止
+        {
+            break;
+        }
+    }
 }
 
 int ReceiveString(std::string& client_message)
@@ -142,7 +160,7 @@ int ReceiveString(std::string& client_message)
     {
         // 接收客戶端的數據
         boost::asio::streambuf buffer;
-        boost::asio::read_until(HOST, buffer, "\n");
+        ReadUntilNewline(HOST, buffer, '\n');
 
         // 解析數據
         std::istream input_stream(&buffer);
