@@ -146,12 +146,15 @@ int Commands_recvive()
         {
             std::vector<std::string> subordinate_checklists = { "Device serial number: " + camera_name+"\r","Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14\r","Device started\r","[subordinate mode] Waiting for signal from master\r"};
             int checki = 0;
-            for (checki = 0; std::getline(output, line)&& checki < subordinate_checklists.size(); checki++) {
+            for (checki = 0; std::getline(output, line);) {
                 std::cout << line << '\n';
                 if (line != subordinate_checklists[checki])
                 {
                     break;
                 }
+                checki++;
+                if (checki >= subordinate_checklists.size())
+                    break;
             }
             if (checki != subordinate_checklists.size())
             {
@@ -169,12 +172,15 @@ int Commands_recvive()
         {
             std::vector<std::string> master_checklists = { "Device serial number: " + camera_name + "\r","Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14\r","Device started\r"};
             int checki = 0;
-            for (checki = 0; std::getline(output, line) && checki < master_checklists.size(); checki++) {
+            for (checki = 0; std::getline(output, line);) {
                 std::cout << line << '\n';
                 if (line != master_checklists[checki])
                 {
                     break;
                 }
+                checki++;
+                if (checki >= master_checklists.size())
+                    break;
             }
             if (checki != master_checklists.size())
             {
