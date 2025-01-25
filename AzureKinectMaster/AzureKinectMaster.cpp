@@ -6,6 +6,7 @@
 #include <k4arecord/record.h>
 #include <k4arecord/playback.h>
 #include <thread>
+#include <boost/process.hpp>
 
 /*
 連線到伺服器
@@ -37,7 +38,7 @@ int SendString(std::string& host_message);
 
 int main() {
     CHECK_AND_RETURN(Connect_to_host());
-    CHECK_AND_RETURN(Get_camera());
+    //CHECK_AND_RETURN(Get_camera());
     CHECK_AND_RETURN(Switch_working_environments());
     CHECK_AND_RETURN(Recvive_camera_id());
     CHECK_AND_RETURN(Commands_recvive());
@@ -129,13 +130,31 @@ int Recvive_camera_id()
     }
 }
 
+namespace bp = boost::process;
+
 int Commands_recvive()
 {
-    std::string command;
-    CHECK_AND_RETURN(ReceiveString(command));
-    std::cout << command << std::endl;
-    std::string s = "success";
-    CHECK_AND_RETURN(SendString(s));
+    try {
+        std::string command;
+        CHECK_AND_RETURN(ReceiveString(command));
+        std::cout << command << std::endl;
+        bp::opstream input; // 用於提供標準輸入
+        bp::ipstream output; // 用於接收標準輸出
+        bp::child process(command, bp::std_out > output);
+        std::string line;
+        while (std::getline(output, line)) {
+            std::cout << line << '\n';
+        }
+        std::cout << "Exit code: " << process.exit_code() << '\n';
+        process.wait();
+        std::string s = "success";
+        CHECK_AND_RETURN(SendString(s));
+        return 0;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 1;
+    }
 }
 
 void ReadUntilNewline(boost::asio::ip::tcp::socket& socket, boost::asio::streambuf& buffer, char c)
