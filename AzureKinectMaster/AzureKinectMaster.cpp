@@ -38,7 +38,7 @@ int SendString(std::string& host_message);
 
 int main() {
     CHECK_AND_RETURN(Connect_to_host());
-    //CHECK_AND_RETURN(Get_camera());
+    CHECK_AND_RETURN(Get_camera());
     CHECK_AND_RETURN(Switch_working_environments());
     CHECK_AND_RETURN(Recvive_camera_id());
     CHECK_AND_RETURN(Commands_recvive());
