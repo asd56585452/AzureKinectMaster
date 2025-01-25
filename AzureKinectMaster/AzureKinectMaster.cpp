@@ -142,13 +142,58 @@ int Commands_recvive()
         bp::ipstream output; // 用於接收標準輸出
         bp::child process(command, bp::std_out > output);
         std::string line;
-        while (std::getline(output, line)) {
+        if (camera_id != 1)
+        {
+            std::vector<std::string> subordinate_checklists = { "Device serial number: " + camera_name,"Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14","Device started","[subordinate mode] Waiting for signal from master" };
+            int checki = 0;
+            for (checki = 0; std::getline(output, line)&& checki < subordinate_checklists.size(); checki++) {
+                std::cout << line << '\n';
+                if (line != subordinate_checklists[checki])
+                {
+                    break;
+                }
+            }
+            if (checki != subordinate_checklists.size())
+            {
+                std::string s = "fail";
+                CHECK_AND_RETURN(SendString(s));
+                return 1;
+            }
+            else
+            {
+                std::string s = "success";
+                CHECK_AND_RETURN(SendString(s));
+            }
+        }
+        else
+        {
+            std::vector<std::string> master_checklists = { "Device serial number: " + camera_name,"Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14","Device started"};
+            int checki = 0;
+            for (checki = 0; std::getline(output, line) && checki < master_checklists.size(); checki++) {
+                std::cout << line << '\n';
+                if (line != master_checklists[checki])
+                {
+                    break;
+                }
+            }
+            if (checki != master_checklists.size())
+            {
+                std::string s = "fail";
+                CHECK_AND_RETURN(SendString(s));
+                return 1;
+            }
+            else
+            {
+                std::string s = "success";
+                CHECK_AND_RETURN(SendString(s));
+            }
+        }
+        while (std::getline(output, line))
+        {
             std::cout << line << '\n';
         }
         std::cout << "Exit code: " << process.exit_code() << '\n';
         process.wait();
-        std::string s = "success";
-        CHECK_AND_RETURN(SendString(s));
         return 0;
     }
     catch (const std::exception& e) {
