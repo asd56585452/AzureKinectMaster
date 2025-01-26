@@ -10,7 +10,7 @@
 
 /*
 連線到伺服器
-*/
+*/ 
 
 using boost::asio::ip::tcp;
 
@@ -20,6 +20,8 @@ k4a_device_t device;
 uint32_t camnum = 0;
 std::string camera_name = "000835513412";
 int camera_id = -1;
+std::string mkvfilename = "output.mkv";
+std::string HOSTIP = "140.114.24.234";//140.114.24.234,127.0.0.1 
 
 void Print_error(std::string s);
 int Switch_working_environments();
@@ -27,8 +29,11 @@ int Connect_to_host();
 int Get_camera();
 int Recvive_camera_id();
 int Commands_recvive();
+std::string get_last_word(const std::string& str);
 int ReceiveString(std::string& client_message);
 int SendString(std::string& host_message);
+int Send_mkv_file();
+int send_file(const std::string& file_path, const std::string& host, unsigned short port);
 
 #define CHECK_AND_RETURN(func) \
     if ((func) == 1) { \
@@ -41,7 +46,12 @@ int main() {
     CHECK_AND_RETURN(Get_camera());
     CHECK_AND_RETURN(Switch_working_environments());
     CHECK_AND_RETURN(Recvive_camera_id());
-    CHECK_AND_RETURN(Commands_recvive());
+    while (true)
+    {
+        CHECK_AND_RETURN(Commands_recvive());
+        CHECK_AND_RETURN(Send_mkv_file());
+    }
+    
     return 0;
 }
 
@@ -67,7 +77,7 @@ int Switch_working_environments()//Create directories and switch working environ
 int Connect_to_host()
 {
     try {
-        HOST.connect(tcp::endpoint(boost::asio::ip::make_address("140.114.24.234"), 8080));//140.114.24.234
+        HOST.connect(tcp::endpoint(boost::asio::ip::make_address(HOSTIP), 8080));
         return 0;
     }
     catch (...) {
@@ -128,6 +138,14 @@ int Recvive_camera_id()
     catch (...) {
         return 1;
     }
+}
+
+std::string get_last_word(const std::string& str) {
+    size_t pos = str.find_last_of(' '); // 找到最後一個空白的索引
+    if (pos == std::string::npos) {
+        return str; // 如果沒有空白，整個字串就是最後的單詞
+    }
+    return str.substr(pos + 1); // 截取從最後一個空白到結尾的子字串
 }
 
 namespace bp = boost::process;
@@ -200,6 +218,26 @@ int Commands_recvive()
         }
         std::cout << "Exit code: " << process.exit_code() << '\n';
         process.wait();
+        mkvfilename = get_last_word(command);
+        return 0;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 1;
+    }
+}
+
+int Send_mkv_file()
+{
+    try {
+        std::string s;
+        CHECK_AND_RETURN(ReceiveString(s));
+        if (s != "RequestFile")
+        {
+            std::cerr << "Not RequestFile" << std::endl;
+            return 1;
+        }
+        send_file(mkvfilename, HOSTIP, 12345);
         return 0;
     }
     catch (const std::exception& e) {
@@ -237,8 +275,8 @@ int ReceiveString(std::string& client_message)
         std::getline(input_stream, client_message);
         return 0;
     }
-    catch (const std::exception&)
-    {
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
 
@@ -251,9 +289,49 @@ int SendString(std::string& host_message)
         boost::asio::write(HOST, boost::asio::buffer(host_message+"\n"));
         return 0;
     }
-    catch (const std::exception&)
-    {
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
 
+}
+
+int send_file(const std::string& file_path, const std::string& host, unsigned short port) {
+    try {
+        boost::asio::io_context io_context;
+        tcp::socket socket(io_context);
+        tcp::resolver resolver(io_context);
+        boost::asio::connect(socket, resolver.resolve(host, std::to_string(port)));
+
+        std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+        if (!file) {
+            std::cerr << "Failed to open file: " << file_path << "\n";
+            return;
+        }
+
+        std::streamsize file_size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // 發送檔案大小
+        boost::asio::write(socket, boost::asio::buffer(&file_size, sizeof(file_size)));
+
+        const size_t chunk_size = 4096;
+        char buffer[chunk_size];
+        std::streamsize bytes_read;
+
+        while ((bytes_read = file.read(buffer, chunk_size).gcount()) > 0) {
+            boost::asio::write(socket, boost::asio::buffer(buffer, bytes_read));
+        }
+
+        std::cout << "File sent successfully!\n";
+
+        // 顯式關閉socket
+        socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both);
+        socket.close();
+        return 0;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 1;
+    }
 }
