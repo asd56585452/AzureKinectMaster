@@ -306,7 +306,7 @@ int send_file(const std::string& file_path, const std::string& host, unsigned sh
         std::ifstream file(file_path, std::ios::binary | std::ios::ate);
         if (!file) {
             std::cerr << "Failed to open file: " << file_path << "\n";
-            return;
+            return 1;
         }
 
         std::streamsize file_size = file.tellg();
