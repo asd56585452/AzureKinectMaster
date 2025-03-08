@@ -21,7 +21,7 @@ uint32_t camnum = 0;
 std::string camera_name = "000835513412";
 int camera_id = -1;
 std::string mkvfilename = "output.mkv";
-std::string HOSTIP = "140.114.24.234";//140.114.24.234,127.0.0.1 
+std::string HOSTIP = "192.168.50.200";//140.114.24.234,127.0.0.1 
 
 void Print_error(std::string s);
 int Switch_working_environments();
