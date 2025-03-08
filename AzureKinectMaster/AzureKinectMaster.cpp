@@ -41,7 +41,11 @@ int send_file(const std::string& file_path, const std::string& host, unsigned sh
         return 1; \
     }
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        std::string inputIPString(argv[1]);
+        HOSTIP = inputIPString;
+    }
     CHECK_AND_RETURN(Connect_to_host());
     CHECK_AND_RETURN(Get_camera());
     CHECK_AND_RETURN(Switch_working_environments());

@@ -32,8 +32,8 @@ if %count% EQU 1 (
 :: 若 = 0，就代表所有都結束了，可以一次啟動 2 個
 if %count% EQU 0 (
     echo 0 instances found. Starting 2 new ones...
-    start "" /B AzureKinectMaster.exe
-    start "" /B AzureKinectMaster.exe
+    start "" /B AzureKinectMaster.exe 192.168.50.200
+    start "" /B AzureKinectMaster.exe 192.168.50.200
     echo Wait 5 seconds after launching...
     timeout /t 5 /nobreak >nul
     goto Check
