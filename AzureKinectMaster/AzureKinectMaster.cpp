@@ -7,6 +7,10 @@
 #include <k4arecord/playback.h>
 #include <thread>
 #include <boost/process.hpp>
+#include <filesystem> // For file deletion
+
+namespace fs = std::filesystem;
+
 
 /*
 連線到伺服器
@@ -329,9 +333,21 @@ int send_file(const std::string& file_path, const std::string& host, unsigned sh
 
         std::cout << "File sent successfully!\n";
 
+        file.close();
+
+
         // 顯式關閉socket
         socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both);
         socket.close();
+
+        if (fs::exists(file_path)) {
+            fs::remove(file_path);
+            std::cout << "File deleted successfully!\n";
+        }
+        else {
+            std::cerr << "Warning: File not found for deletion: " << file_path << "\n";
+        }
+
         return 0;
     }
     catch (const std::exception& e) {
