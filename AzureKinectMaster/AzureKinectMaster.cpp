@@ -8,14 +8,14 @@
 #include <thread>
 #include <boost/process.hpp>
 #include <filesystem> // For file deletion
+#include <atomic>
 
 namespace fs = std::filesystem;
 
 
 /*
 連線到伺服器
-*/ 
-
+*/
 using boost::asio::ip::tcp;
 
 boost::asio::io_context io_context;
@@ -38,28 +38,58 @@ int ReceiveString(std::string& client_message);
 int SendString(std::string& host_message);
 int Send_mkv_file();
 int send_file(const std::string& file_path, const std::string& host, unsigned short port);
+int Preview_streaming();
+void StopPreview();
+void StartPreview();
+void IDConfirm();
 
+//use to control preview stream
+std::atomic<bool> preview_running(false);
+std::atomic<bool> streaming(false);
+std::thread preview_thread;
+std::thread preview_control_thread;
+boost::asio::io_context io_context_preview;
+tcp::socket preview_socket(io_context_preview);
+tcp::resolver resolver(io_context_preview);
+char cmd_buffer;
 #define CHECK_AND_RETURN(func) \
     if ((func) == 1) { \
         Print_error(#func); \
+        StopPreview(); \
+        preview_socket.close(); \
         return 1; \
     }
-
 int main(int argc, char* argv[]) {
     if (argc > 1) {
-        std::string inputIPString(argv[1]);
-        HOSTIP = inputIPString;
+        HOSTIP = std::string(argv[1]);
     }
+
     CHECK_AND_RETURN(Connect_to_host());
     CHECK_AND_RETURN(Get_camera());
     CHECK_AND_RETURN(Switch_working_environments());
     CHECK_AND_RETURN(Recvive_camera_id());
+    boost::asio::connect(preview_socket, resolver.resolve(HOSTIP, "13579"));
+    IDConfirm();
+    if (camera_id %1==0) {
+        StartPreview();
+    }
     while (true)
     {
+        // 先停止 preview 再跑錄影指令
         CHECK_AND_RETURN(Commands_recvive());
+
+        // 傳送錄好的檔案
         CHECK_AND_RETURN(Send_mkv_file());
+        if (camera_id % 1 == 0) {
+            StartPreview();
+        }
+        
     }
-    
+
+    // 若有離開迴圈，安全停止 preview thread
+    StopPreview();
+    preview_socket.close();
+
     return 0;
 }
 
@@ -93,7 +123,7 @@ int Connect_to_host()
     }
 }
 
-int Get_camera() 
+int Get_camera()
 {
     try
     {
@@ -140,7 +170,7 @@ int Recvive_camera_id()
         s = "";
         CHECK_AND_RETURN(ReceiveString(s));
         camera_id = std::stoi(s);
-        k4a_device_close(device);
+        //k4a_device_close(device);
         return 0;
     }
     catch (...) {
@@ -163,14 +193,17 @@ int Commands_recvive()
     try {
         std::string command;
         CHECK_AND_RETURN(ReceiveString(command));
-        std::cout << command << std::endl;
+        StopPreview();
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        std::cout << "Received command: [" << command << "]\n";
         bp::opstream input; // 用於提供標準輸入
         bp::ipstream output; // 用於接收標準輸出
+        
         bp::child process(command, bp::std_out > output);
         std::string line;
         if (camera_id != 1)
         {
-            std::vector<std::string> subordinate_checklists = { "Device serial number: " + camera_name+"\r","Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14\r","Device started\r","[subordinate mode] Waiting for signal from master\r"};
+            std::vector<std::string> subordinate_checklists = { "Device serial number: " + camera_name + "\r","Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14\r","Device started\r","[subordinate mode] Waiting for signal from master\r" };
             int checki = 0;
             for (checki = 0; std::getline(output, line);) {
                 std::cout << line << '\n';
@@ -196,7 +229,7 @@ int Commands_recvive()
         }
         else
         {
-            std::vector<std::string> master_checklists = { "Device serial number: " + camera_name + "\r","Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14\r","Device started\r"};
+            std::vector<std::string> master_checklists = { "Device serial number: " + camera_name + "\r","Device version: Rel; C: 1.6.110; D: 1.6.80[6109.7]; A: 1.6.14\r","Device started\r" };
             int checki = 0;
             for (checki = 0; std::getline(output, line);) {
                 std::cout << line << '\n';
@@ -285,6 +318,12 @@ int ReceiveString(std::string& client_message)
     }
     catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << '\n';
+        std::string msg = e.what();
+        if (msg.find("End of file") != std::string::npos) {
+            // detect EOF error, treat as connection closed or handled case
+            std::cerr << "Detected EOF. Treating as graceful close.\n";
+            return 0; // or return a special code if you want to handle reconnection
+        }
         return 1;
     }
 
@@ -294,7 +333,7 @@ int SendString(std::string& host_message)
 {
     try
     {
-        boost::asio::write(HOST, boost::asio::buffer(host_message+"\n"));
+        boost::asio::write(HOST, boost::asio::buffer(host_message + "\n"));
         return 0;
     }
     catch (const std::exception& e) {
@@ -354,4 +393,140 @@ int send_file(const std::string& file_path, const std::string& host, unsigned sh
         std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
+}
+void start_async_read_command() {
+    preview_socket.async_read_some(boost::asio::buffer(&cmd_buffer, 1),
+        [](boost::system::error_code ec, std::size_t length) {
+            if (!ec && length == 1) {
+                char cmd = cmd_buffer;
+                if (cmd == 'S') {
+                    streaming = true;
+                    std::cout << "[Control] Start streaming command received.\n";
+                }
+                else if (cmd == 'P') {
+                    streaming = false;
+                    std::cout << "[Control] Pause streaming command received.\n";
+                }
+                else {
+                    std::cout << "[Control] Unknown command received: " << cmd << "\n";
+                }
+            }
+            else if (ec) {
+                std::cerr << "[Control] Async read error: " << ec.message() << "\n";
+                preview_running = false; // 連線斷開，結束
+                return;
+            }
+
+            if (preview_running) {
+                // 繼續監聽
+                start_async_read_command();
+            }
+        });
+}
+
+// preview control thread 入口函式
+void PreviewControlThreadFunc() {
+    // 開始非同步監聽
+    start_async_read_command();
+
+    // io_context 執行循環（阻塞直到 io_context 被 stop）
+    io_context_preview.run();
+}
+void IDConfirm() {
+    try {
+        char frame_type = 'R'; // or a special type if you define one for preframe
+        uint32_t index = static_cast<uint32_t>(camera_id);
+        uint32_t image_size = 0;
+
+        boost::asio::write(preview_socket, boost::asio::buffer(&frame_type, 1));
+        boost::asio::write(preview_socket, boost::asio::buffer(&index, 4));
+        boost::asio::write(preview_socket, boost::asio::buffer(&image_size, 4));
+
+        std::cout << "Sent preframe for ID confirmation: camera_id=" << camera_id << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error sending preframe: " << e.what() << std::endl;
+    }
+}
+int Preview_streaming() {
+    try {
+        k4a_device_open(camnum, &device);
+        // 設定並啟動攝影機
+        k4a_device_configuration_t config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
+        config.color_format = K4A_IMAGE_FORMAT_COLOR_MJPG;
+        config.color_resolution = K4A_COLOR_RESOLUTION_720P;
+        config.depth_mode = K4A_DEPTH_MODE_NFOV_UNBINNED;
+        config.camera_fps = K4A_FRAMES_PER_SECOND_30;
+
+        if (K4A_FAILED(k4a_device_start_cameras(device, &config))) {
+            std::cerr << "Failed to start cameras\n";
+            return 0;
+        }
+
+        while (preview_running) {
+            if (streaming) {
+                k4a_capture_t capture;
+                if (k4a_device_get_capture(device, &capture, 1000) == K4A_WAIT_RESULT_SUCCEEDED) {
+
+                    k4a_image_t color_image = k4a_capture_get_color_image(capture);
+                    if (color_image != NULL) {
+                        uint8_t* buffer = k4a_image_get_buffer(color_image);
+                        int size = k4a_image_get_size(color_image);
+
+                        char frame_type = 'R';
+                        boost::asio::write(preview_socket, boost::asio::buffer(&frame_type, 1));
+                        uint32_t index = static_cast<uint32_t>(camera_id);
+                        boost::asio::write(preview_socket, boost::asio::buffer(&index, 4));
+                        uint32_t image_size = static_cast<uint32_t>(size);
+                        boost::asio::write(preview_socket, boost::asio::buffer(&image_size, 4));
+
+                        boost::asio::write(preview_socket, boost::asio::buffer(buffer, size));
+
+                        k4a_image_release(color_image);
+                    }
+                    k4a_capture_release(capture);
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30 FPS
+        }
+
+        // 停止攝影機
+        k4a_device_stop_cameras(device);
+        
+        std::cout << "Preview stopped." << std::endl;
+
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Preview streaming error: " << e.what() << std::endl;
+
+    }
+}
+
+void StartPreview() {
+    if (preview_running) return;
+    io_context_preview.restart();
+    preview_running = true;
+    //streaming = false;
+
+    // 啟動兩個 thread
+    preview_thread = std::thread(Preview_streaming);
+    preview_control_thread = std::thread(PreviewControlThreadFunc);
+}
+
+// 停止 preview
+void StopPreview() {
+    if (!preview_running) return;
+
+    preview_running = false;
+
+    // 停止 io_context 的事件循環
+    io_context_preview.stop();
+
+    if (preview_thread.joinable())
+        preview_thread.join();
+    if (preview_control_thread.joinable())
+        preview_control_thread.join();
+
+    // 關閉相機
+    k4a_device_close(device);
 }
