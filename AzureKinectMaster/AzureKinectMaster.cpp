@@ -42,10 +42,15 @@ int Preview_streaming();
 void StopPreview();
 void StartPreview();
 void IDConfirm();
+void StartPreviewControl();
+void StopPreviewControl();
 
 //use to control preview stream
 std::atomic<bool> preview_running(false);
+std::atomic<bool> preview_control_running(false);
 std::atomic<bool> streaming(false);
+std::atomic<bool> preview_socket_alive(true);
+
 std::thread preview_thread;
 std::thread preview_control_thread;
 boost::asio::io_context io_context_preview;
@@ -56,7 +61,7 @@ char cmd_buffer;
     if ((func) == 1) { \
         Print_error(#func); \
         StopPreview(); \
-        preview_socket.close(); \
+        StopPreviewControl();\
         return 1; \
     }
 int main(int argc, char* argv[]) {
@@ -70,9 +75,7 @@ int main(int argc, char* argv[]) {
     CHECK_AND_RETURN(Recvive_camera_id());
     boost::asio::connect(preview_socket, resolver.resolve(HOSTIP, "13579"));
     IDConfirm();
-    if (camera_id %1==0) {
-        StartPreview();
-    }
+    StartPreviewControl();
     while (true)
     {
         // 先停止 preview 再跑錄影指令
@@ -80,16 +83,11 @@ int main(int argc, char* argv[]) {
 
         // 傳送錄好的檔案
         CHECK_AND_RETURN(Send_mkv_file());
-        if (camera_id % 1 == 0) {
-            StartPreview();
-        }
-        
     }
 
     // 若有離開迴圈，安全停止 preview thread
     StopPreview();
-    preview_socket.close();
-
+    StopPreviewControl();
     return 0;
 }
 
@@ -193,8 +191,7 @@ int Commands_recvive()
     try {
         std::string command;
         CHECK_AND_RETURN(ReceiveString(command));
-        StopPreview();
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        //std::this_thread::sleep_for(std::chrono::seconds(10));
         std::cout << "Received command: [" << command << "]\n";
         bp::opstream input; // 用於提供標準輸入
         bp::ipstream output; // 用於接收標準輸出
@@ -397,6 +394,11 @@ int send_file(const std::string& file_path, const std::string& host, unsigned sh
 void start_async_read_command() {
     preview_socket.async_read_some(boost::asio::buffer(&cmd_buffer, 1),
         [](boost::system::error_code ec, std::size_t length) {
+            if (!preview_socket_alive.load()) {
+                std::cout << "[Control] Socket is no longer alive. Exiting callback.\n";
+                return;
+            }
+
             if (!ec && length == 1) {
                 char cmd = cmd_buffer;
                 if (cmd == 'S') {
@@ -407,22 +409,42 @@ void start_async_read_command() {
                     streaming = false;
                     std::cout << "[Control] Pause streaming command received.\n";
                 }
+                else if (cmd == 'R') {
+                    std::cout << "[Control] Prepare for recording.\n";
+                    StopPreview();
+                }
+                else if (cmd == 'O') {
+                    std::cout << "[Control] Open Previewing Thread.\n";
+                    StartPreview();
+                }
                 else {
                     std::cout << "[Control] Unknown command received: " << cmd << "\n";
                 }
             }
             else if (ec) {
                 std::cerr << "[Control] Async read error: " << ec.message() << "\n";
-                preview_running = false; // 連線斷開，結束
+
+                if (ec == boost::asio::error::eof || ec == boost::asio::error::connection_reset) {
+                    std::cerr << "[Control] Connection closed by peer.\n";
+                }
+
+                preview_control_running = false;
+                preview_socket_alive = false;
+
+                // Cancel socket to abort any pending operations
+                boost::system::error_code cancel_ec;
+                preview_socket.cancel(cancel_ec);
+
                 return;
             }
 
-            if (preview_running) {
+            if (preview_control_running && preview_socket_alive) {
                 // 繼續監聽
                 start_async_read_command();
             }
         });
 }
+
 
 // preview control thread 入口函式
 void PreviewControlThreadFunc() {
@@ -503,30 +525,46 @@ int Preview_streaming() {
 }
 
 void StartPreview() {
-    if (preview_running) return;
-    io_context_preview.restart();
+    if (preview_running)return;
     preview_running = true;
-    //streaming = false;
-
-    // 啟動兩個 thread
     preview_thread = std::thread(Preview_streaming);
-    preview_control_thread = std::thread(PreviewControlThreadFunc);
+    
 }
 
 // 停止 preview
 void StopPreview() {
-    if (!preview_running) return;
+    if (!preview_running)return;
 
     preview_running = false;
-
-    // 停止 io_context 的事件循環
-    io_context_preview.stop();
-
     if (preview_thread.joinable())
         preview_thread.join();
-    if (preview_control_thread.joinable())
-        preview_control_thread.join();
-
     // 關閉相機
     k4a_device_close(device);
+}
+void StartPreviewControl() {
+    if (preview_control_running)return;
+    preview_control_running = true;
+    io_context_preview.restart();
+    preview_control_thread = std::thread(PreviewControlThreadFunc);
+}
+void StopPreviewControl() {
+    preview_control_running = false;
+    preview_socket_alive = false;
+
+    // Cancel all async operations before stopping
+    boost::system::error_code ec;
+    preview_socket.cancel(ec);
+    if (ec) {
+        std::cerr << "Error cancelling preview_socket: " << ec.message() << std::endl;
+    }
+
+    io_context_preview.stop();
+
+    if (preview_control_thread.joinable())
+        preview_control_thread.join();
+    // Finally close socket
+    preview_socket.close(ec);
+    if (ec) {
+        std::cerr << "Error closing preview_socket: " << ec.message() << std::endl;
+    }
 }
