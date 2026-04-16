@@ -18,11 +18,19 @@
     <ClCompile Include="AzureKinectMaster.cpp">
       <Filter>來源檔案</Filter>
     </ClCompile>
+    <ClCompile Include="KinectCompressor.cpp">
+      <Filter>資源檔</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="start_k4aclicent.bat">
       <Filter>來源檔案</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="KinectCompressor.hpp">
+      <Filter>標頭檔</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

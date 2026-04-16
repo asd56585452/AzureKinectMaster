@@ -9,6 +9,7 @@
 #include <boost/process.hpp>
 #include <filesystem> // For file deletion
 #include <atomic>
+#include "KinectCompressor.hpp"
 
 namespace fs = std::filesystem;
 
@@ -26,6 +27,9 @@ std::string camera_name = "000835513412";
 int camera_id = -1;
 std::string mkvfilename = "output.mkv";
 std::string HOSTIP = "192.168.50.200";//140.114.24.234,127.0.0.1 
+
+std::atomic<bool> compression_done(false);
+std::string last_compressed_file = "";
 
 void Print_error(std::string s);
 int Switch_working_environments();
@@ -56,6 +60,7 @@ std::thread preview_control_thread;
 boost::asio::io_context io_context_preview;
 tcp::socket preview_socket(io_context_preview);
 tcp::resolver resolver(io_context_preview);
+void AsyncCompress(std::string input_mkv);
 char cmd_buffer;
 #define CHECK_AND_RETURN(func) \
     if ((func) == 1) { \
@@ -80,6 +85,8 @@ int main(int argc, char* argv[]) {
     {
         // 先停止 preview 再跑錄影指令
         CHECK_AND_RETURN(Commands_recvive());
+
+        std::thread(AsyncCompress, mkvfilename).detach();
 
         // 傳送錄好的檔案
         CHECK_AND_RETURN(Send_mkv_file());
@@ -275,7 +282,13 @@ int Send_mkv_file()
             std::cerr << "Not RequestFile" << std::endl;
             return 1;
         }
-        send_file(mkvfilename, HOSTIP, 12345);
+
+        while (!compression_done) {
+            std::cout << "Waiting for compression..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        send_file(last_compressed_file, HOSTIP, 12345);
         return 0;
     }
     catch (const std::exception& e) {
@@ -567,4 +580,29 @@ void StopPreviewControl() {
     if (ec) {
         std::cerr << "Error closing preview_socket: " << ec.message() << std::endl;
     }
+}
+
+void AsyncCompress(std::string input_mkv) {
+    compression_done = false;
+
+    // 確保副檔名是 .mkv
+    std::string base = input_mkv;
+    if (base.size() < 4 || base.substr(base.size() - 4) != ".mkv") {
+        base += ".mkv";
+    }
+    std::string compressed_filename = "compressed_" + base;
+
+    KinectProcessor processor;
+    if (processor.Initialize(input_mkv.c_str()) &&
+        processor.InitColorEncoder(5) &&
+        processor.InitDepthEncoder(processor.GetDepthWidth(), processor.GetDepthHeight()) &&
+        processor.InitMuxer(compressed_filename.c_str())) {
+
+        std::cout << "Starting background compression: " << input_mkv << std::endl;
+        processor.Process();
+        processor.Finalize(compressed_filename.c_str());
+        std::cout << "Compression finished: " << compressed_filename << std::endl;
+    }
+    last_compressed_file = compressed_filename;
+    compression_done = true;
 }

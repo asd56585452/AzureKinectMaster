@@ -133,10 +133,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AzureKinectMaster.cpp" />
+    <ClCompile Include="KinectCompressor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
     <None Include="start_k4aclicent.bat" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="KinectCompressor.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
